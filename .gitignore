@@ -1,0 +1,22 @@
+# Proprietary APKs & signing keystores (users supply their own official APK)
+*.apk
+*.apk.unaligned
+*.idsig
+keystore/*.keystore
+keystore/*.jks
+
+# Personal watchface presets & captured official cloud dials
+presets/
+fonts/*.ttf
+fonts/*.otf
+samples/*.bin
+samples/user_*
+samples/decoded_*
+
+# Python & OS artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+Thumbs.db
