@@ -549,6 +549,17 @@
                 </select>
               </div>
 
+              <div class="row">
+                <div class="field">
+                  <label>AMOLED Brightness <span class="tabular" id="bgBrightVal">100%</span></label>
+                  <input type="range" id="bgBright" min="15" max="100" step="5" value="100" oninput="document.getElementById('bgBrightVal').textContent=this.value+'%'; schedulePreview()" />
+                </div>
+                <div class="field">
+                  <label>Dark Edge Vignette <span class="tabular" id="bgVigVal">0%</span></label>
+                  <input type="range" id="bgVig" min="0" max="80" step="5" value="0" oninput="document.getElementById('bgVigVal').textContent=this.value+'%'; schedulePreview()" />
+                </div>
+              </div>
+
               <div id="bgImageOpts" style="display:none;">
                 <div class="dropzone" id="dropzone" onclick="document.getElementById('bgFileInput').click()">
                   Drop PNG, JPG, or WEBP here — or click to browse
@@ -939,6 +950,8 @@
         background: {
           mode: document.getElementById("bgMode").value,
           image_data: inlineBgData || undefined,
+          brightness: parseInt(document.getElementById("bgBright").value),
+          vignette: parseInt(document.getElementById("bgVig").value),
           color: document.getElementById("bgCol1").value,
           color2: document.getElementById("bgCol2").value,
           omni_style: document.getElementById("omniStyle").value,
@@ -993,6 +1006,10 @@
       const bg = cfg.background || {};
       document.getElementById("bgMode").value = bg.mode || "solid";
       inlineBgData = bg.image_data || "";
+      document.getElementById("bgBright").value = bg.brightness ?? 100;
+      document.getElementById("bgBrightVal").textContent = (bg.brightness ?? 100) + "%";
+      document.getElementById("bgVig").value = bg.vignette ?? 0;
+      document.getElementById("bgVigVal").textContent = (bg.vignette ?? 0) + "%";
       if (bg.color) document.getElementById("bgCol1").value = bg.color;
       if (bg.color2) document.getElementById("bgCol2").value = bg.color2;
       if (bg.omni_style) document.getElementById("omniStyle").value = bg.omni_style;

@@ -108,10 +108,51 @@ def render_styled_text_sprite(text, box_w, box_h, font, color="#FFFFFF", color2=
     return canvas
 
 
+def apply_amoled_dimmer(img_rgba, brightness_pct=100, vignette_pct=0):
+    """
+    Scale RGB pixel values to achieve true sub-hardware AMOLED dimming (15%..100%)
+    and optional smooth radial dark edge vignette (0%..80%).
+    """
+    b_scale = max(0.10, min(1.0, float(brightness_pct) / 100.0))
+    v_strength = max(0.0, min(0.90, float(vignette_pct) / 100.0))
+    if b_scale >= 0.999 and v_strength <= 0.001:
+        return img_rgba
+
+    w, h = img_rgba.size
+    r, g, b, a = img_rgba.split()
+    if b_scale < 0.999:
+        lut = [int(i * b_scale) for i in range(256)]
+        r = r.point(lut)
+        g = g.point(lut)
+        b = b.point(lut)
+    out = Image.merge("RGBA", (r, g, b, a))
+
+    if v_strength > 0.001:
+        # Radial dark vignette mask near the circular bezel edge
+        vig = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        vd = ImageDraw.Draw(vig)
+        cx, cy = w // 2, h // 2
+        max_r = min(cx, cy)
+        steps = 28
+        for i in range(steps):
+            t = i / (steps - 1)  # 0 inner -> 1 outer
+            rad = int(max_r * (1.0 - 0.42 * (1.0 - t)))
+            alpha = int(255 * v_strength * (t ** 1.8))
+            vd.ellipse((cx - rad, cy - rad, cx + rad, cy + rad), outline=(0, 0, 0, alpha), width=max(2, max_r // steps + 1))
+        # Clip vignette to existing alpha
+        vig_clipped = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        vig_clipped.paste(vig, (0, 0), a)
+        out = Image.alpha_composite(out, vig_clipped)
+    return out
+
+
 def build_background(bg_cfg):
     mode = bg_cfg.get("mode", "solid")
+    brightness = float(bg_cfg.get("brightness", 100))
+    vignette = float(bg_cfg.get("vignette", 0))
     if mode == "image" and bg_cfg.get("image_path") and os.path.exists(bg_cfg["image_path"]):
-        return prepare_circular_image(bg_cfg["image_path"], W)
+        img = prepare_circular_image(bg_cfg["image_path"], W)
+        return apply_amoled_dimmer(img, brightness, vignette)
     if mode == "omnitrix":
         style = bg_cfg.get("omni_style", "alien_force")
         colorway = bg_cfg.get("omni_colorway", "green")
@@ -119,7 +160,8 @@ def build_background(bg_cfg):
         ticks = bool(bg_cfg.get("omni_ticks", True))
         glow = float(bg_cfg.get("omni_glow", 1.0))
         pal = resolve_palette(colorway, custom_hex)
-        return draw_omnitrix_bg(style=style, palette=pal, show_ticks=ticks, glow_strength=glow)
+        img = draw_omnitrix_bg(style=style, palette=pal, show_ticks=ticks, glow_strength=glow)
+        return apply_amoled_dimmer(img, brightness, vignette)
 
     # Solid or vertical gradient round AMOLED background
     c1 = hex_to_rgb(bg_cfg.get("color", "#0b0e14"))
@@ -136,7 +178,7 @@ def build_background(bg_cfg):
     ImageDraw.Draw(mask).ellipse((0, 0, W - 1, H - 1), fill=255)
     out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     out.paste(img, (0, 0), mask)
-    return out
+    return apply_amoled_dimmer(out, brightness, vignette)
 
 
 def build_digital_clock_assets(clk_cfg):

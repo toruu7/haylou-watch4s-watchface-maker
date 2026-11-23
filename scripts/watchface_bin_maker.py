@@ -143,10 +143,16 @@ def pad4_ff(buf):
     if rem != 0:
         buf.extend(b'\xff' * (4 - rem))
 
-def build_watchface_bin(bg_path, out_bin_path, no_clock=True, clock_pos=None, font_path=None, font_size=60, font_color="#FFFFFF"):
-    print(f"[*] Building Haylou Watch 4S .bin from: {bg_path}")
+def build_watchface_bin(bg_path, out_bin_path, no_clock=True, clock_pos=None, font_path=None, font_size=60, font_color="#FFFFFF", brightness_pct=100):
+    print(f"[*] Building Haylou Watch 4S .bin from: {bg_path} (AMOLED brightness={brightness_pct}%)")
     bg_img = prepare_circular_image(bg_path, WATCH_W)
     prev_img = prepare_circular_image(bg_path, PREV_W)
+    if brightness_pct < 100:
+        b_scale = max(0.10, min(1.0, float(brightness_pct) / 100.0))
+        lut = [int(i * b_scale) for i in range(256)]
+        for im in (bg_img, prev_img):
+            r, g, b, a = im.split()
+            im.paste(Image.merge("RGBA", (r.point(lut), g.point(lut), b.point(lut), a)))
     digit_imgs = render_digit_images(no_clock=no_clock, font_path=font_path, font_size=font_size, font_color=font_color)
 
     if clock_pos:
@@ -240,6 +246,7 @@ if __name__ == '__main__':
     parser.add_argument("--font", default=None, help="Path to custom .ttf/.otf font file")
     parser.add_argument("--font-size", type=int, default=60, help="Font size in pixels (default 60)")
     parser.add_argument("--font-color", default="#FFFFFF", help="Hex color for clock digits (default #FFFFFF)")
+    parser.add_argument("--brightness", type=int, default=100, help="AMOLED brightness percentage 15..100 (default 100; try 45 for low-glare)")
     parser.add_argument("--push", action="store_true", help="Push generated .bin directly to phone via ADB")
     args = parser.parse_args()
 
@@ -252,6 +259,7 @@ if __name__ == '__main__':
         font_path=args.font,
         font_size=args.font_size,
         font_color=args.font_color,
+        brightness_pct=args.brightness,
     )
     if args.push:
         push_bin_to_phone(out_path)
