@@ -4,6 +4,17 @@ An open-source visual watchface designer, native binary (`.bin`) compiler, and A
 
 Overcomes the default Haylou Fun companion app limitations—fixed clock placements, fixed fonts, and inability to hide the clock—by compiling **genuine JieLi / MoYoung ARGB565-RLE `.bin` watchfaces** and installing them through the watch's official cloud dial slot.
 
+![Watch 4S Studio Designer](docs/screenshots/studio_designer.png)
+
+![Watchface Showcase](docs/screenshots/watchface_showcase.png)
+
+<details>
+<summary><strong>View Watch Face Gallery Screenshot</strong></summary>
+
+![Watch 4S Studio Gallery](docs/screenshots/studio_gallery.png)
+
+</details>
+
 ---
 
 ## Features

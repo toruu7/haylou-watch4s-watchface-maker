@@ -3,270 +3,292 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Haylou Watch 4S Studio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+  <title>Watch 4S Studio</title>
   <style>
     :root {
-      --bg: #080a0e;
-      --surface: #10141c;
-      --surface-raised: #161c26;
-      --surface-hover: #1d2532;
-      --border: rgba(255, 255, 255, 0.08);
-      --border-strong: rgba(255, 255, 255, 0.14);
-      --text: #f1f5f9;
-      --text-secondary: #a8b8ce;
-      --text-muted: #8b9bb4;
-      --accent: #22c55e;
-      --accent-hover: #16a34a;
-      --accent-tint: rgba(34, 197, 94, 0.12);
-      --danger: #ef4444;
-      --danger-tint: rgba(239, 68, 68, 0.12);
-      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-      --radius-sm: 8px;
-      --radius-md: 12px;
-      --radius-lg: 18px;
-      --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
-      --shadow-watch: 0 28px 60px rgba(0, 0, 0, 0.72), 0 8px 20px rgba(0, 0, 0, 0.55);
+      /* Apple macOS Sequoia Dark Mode Material Tokens */
+      --bg: #0b0b0d;
+      --sidebar: #141416;
+      --surface: #1c1c1e;
+      --surface-elevated: #242426;
+      --control: #2c2c2e;
+      --control-hover: #3a3a3c;
+      --hairline: rgba(255, 255, 255, 0.08);
+      --hairline-strong: rgba(255, 255, 255, 0.14);
+      --catchlight: rgba(255, 255, 255, 0.16);
+
+      /* High-contrast Apple Neutral Typography */
+      --label: #f5f5f7;
+      --label-secondary: #aeaeb2;
+      --label-tertiary: #98989d;
+
+      /* Apple System Accents */
+      --blue: #0a84ff;
+      --blue-hover: #409cff;
+      --blue-tint: rgba(10, 132, 255, 0.16);
+      --green: #30d158;
+      --red: #ff453a;
+      --red-tint: rgba(255, 69, 58, 0.14);
+
+      --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
+      --shadow-dock: 0 18px 44px rgba(0, 0, 0, 0.58), 0 2px 8px rgba(0, 0, 0, 0.4);
+      --shadow-watch: 0 32px 72px rgba(0, 0, 0, 0.8), 0 10px 24px rgba(0, 0, 0, 0.6);
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    ::selection { background: rgba(34, 197, 94, 0.28); color: #fff; }
-    * { caret-color: var(--accent); scrollbar-width: thin; scrollbar-color: #283345 transparent; }
-    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::selection { background: rgba(10, 132, 255, 0.35); color: #fff; }
+    * { caret-color: var(--blue); scrollbar-width: thin; scrollbar-color: #3a3a3c transparent; }
+    *::-webkit-scrollbar { width: 6px; height: 6px; }
     *::-webkit-scrollbar-track { background: transparent; }
-    *::-webkit-scrollbar-thumb { background: #283345; border-radius: 99px; }
-    *::-webkit-scrollbar-thumb:hover { background: #3b4a63; }
+    *::-webkit-scrollbar-thumb { background: #3a3a3c; border-radius: 99px; }
 
+    html, body { height: 100%; overflow: hidden; }
     body {
-      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: radial-gradient(1200px 600px at 50% -180px, rgba(34, 197, 94, 0.06), transparent 65%), var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      line-height: 1.45;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--label);
+      display: flex;
+      flex-direction: column;
       -webkit-font-smoothing: antialiased;
-      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+      font-size: 13px;
+      line-height: 1.45;
     }
 
     .tabular { font-variant-numeric: tabular-nums; }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
-    :focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    /* Header */
+    /* Unified macOS Translucent Titlebar */
     header {
-      display: flex; align-items: center; justify-content: space-between; gap: 16px;
-      padding: 14px 28px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(8, 10, 14, 0.82);
-      backdrop-filter: saturate(160%) blur(14px);
-      position: sticky; top: 0; z-index: 30;
+      height: 52px;
+      flex-shrink: 0;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      padding: 0 18px;
+      background: rgba(22, 22, 24, 0.78);
+      backdrop-filter: blur(24px) saturate(180%);
+      border-bottom: 1px solid var(--hairline);
+      z-index: 30;
     }
 
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand-mark {
-      width: 34px; height: 34px; border-radius: 10px;
-      background: linear-gradient(145deg, #1b2330, #11161f);
-      border: 1px solid var(--border-strong);
-      display: grid; place-items: center;
-      color: var(--accent);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    .title-left { display: flex; align-items: center; gap: 10px; }
+    .app-glyph {
+      width: 26px; height: 26px; border-radius: 7px;
+      background: linear-gradient(180deg, #2c2c2e, #1c1c1e);
+      border: 1px solid var(--hairline-strong);
+      display: grid; place-items: center; color: var(--label);
     }
-    .brand h1 { font-size: 15.5px; font-weight: 600; letter-spacing: -0.02em; }
-    .brand p { font-size: 12px; color: var(--text-muted); }
+    .app-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.015em; }
+    .app-sub { font-size: 11.5px; color: var(--label-tertiary); margin-left: 2px; }
 
-    /* Segmented Tab Control */
+    /* Apple Segmented Control */
     .segmented {
       position: relative;
       display: inline-flex;
-      padding: 4px;
-      border-radius: 11px;
-      background: var(--surface);
-      border: 1px solid var(--border);
+      padding: 3px;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--hairline);
     }
-    .seg-indicator {
-      position: absolute;
-      top: 4px; bottom: 4px; left: 4px;
-      border-radius: 8px;
-      background: var(--surface-raised);
-      border: 1px solid var(--border-strong);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-      transition: transform 280ms var(--ease-out), width 280ms var(--ease-out);
+    .seg-pill {
+      position: absolute; top: 3px; bottom: 3px; left: 3px;
+      border-radius: 6.5px;
+      background: #323236;
+      border-top: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+      transition: transform 280ms var(--ease-fluid), width 280ms var(--ease-fluid);
       pointer-events: none;
     }
     .seg-btn {
       position: relative; z-index: 1;
+      padding: 5px 16px; border: none; background: transparent;
+      color: var(--label-secondary); font-family: inherit; font-size: 12.5px; font-weight: 500;
+      cursor: pointer; border-radius: 6.5px;
+      transition: color 140ms ease;
+    }
+    .seg-btn:hover { color: var(--label); }
+    .seg-btn.active { color: var(--label); font-weight: 600; }
+
+    .title-right { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .status-chip {
       display: inline-flex; align-items: center; gap: 7px;
-      padding: 7px 16px; border: none; background: transparent;
-      color: var(--text-secondary); font-size: 13px; font-weight: 500;
-      cursor: pointer; border-radius: 8px;
-      transition: color 160ms ease;
+      padding: 5px 11px; border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--hairline);
+      font-size: 12px; color: var(--label-secondary);
     }
-    .seg-btn:hover { color: var(--text); }
-    .seg-btn.active { color: var(--text); font-weight: 600; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--label-tertiary); }
+    .status-chip.ok .status-dot { background: var(--green); }
+    .status-chip.ok { color: var(--label); }
 
-    .header-actions { display: flex; align-items: center; gap: 10px; }
-    .adb-pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      padding: 7px 13px; border-radius: 999px;
-      background: var(--surface); border: 1px solid var(--border);
-      font-size: 12px; font-weight: 500; color: var(--text-secondary);
-    }
-    .adb-pill.ok { color: #86efac; border-color: rgba(34, 197, 94, 0.3); background: rgba(34, 197, 94, 0.07); }
-    .adb-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex-shrink: 0; }
-    .adb-pill.ok .adb-dot { background: var(--accent); }
-
-    /* Buttons with Apple-style instant press feedback */
+    /* Native Buttons — instant pointer-down scale */
     .btn {
-      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-      padding: 8px 14px; border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong);
-      background: var(--surface-raised); color: var(--text);
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      white-space: nowrap; flex-shrink: 0;
+      padding: 6px 12px; border-radius: 7px;
+      border: 1px solid var(--hairline-strong);
+      background: var(--control); color: var(--label);
       font-family: inherit; font-size: 12.5px; font-weight: 500;
       cursor: pointer;
-      transition: background 140ms ease, border-color 140ms ease, transform 100ms ease-out, color 140ms ease;
+      transition: background 120ms ease, transform 100ms ease-out, border-color 120ms ease;
     }
-    .btn:hover:not(:disabled) { background: var(--surface-hover); border-color: rgba(255, 255, 255, 0.2); }
+    .btn:hover:not(:disabled) { background: var(--control-hover); }
     .btn:active:not(:disabled) { transform: scale(0.97); }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .btn-primary {
-      background: var(--accent); border-color: var(--accent); color: #052e16; font-weight: 600;
+      background: var(--blue); border-color: transparent; color: #fff; font-weight: 600;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
     }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
-    .btn-ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
-    .btn-ghost:hover:not(:disabled) { background: var(--surface-raised); color: var(--text); }
-    .btn-danger { background: transparent; border-color: rgba(239, 68, 68, 0.28); color: #fca5a5; }
-    .btn-danger:hover:not(:disabled) { background: var(--danger-tint); border-color: rgba(239, 68, 68, 0.5); }
-    .btn-sm { padding: 6px 10px; font-size: 12px; }
-    .btn-icon { padding: 7px; }
+    .btn-primary:hover:not(:disabled) { background: var(--blue-hover); }
+    .btn-quiet { background: transparent; border-color: transparent; color: var(--label-secondary); }
+    .btn-quiet:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--label); }
+    .btn-danger { background: transparent; border-color: transparent; color: var(--red); }
+    .btn-danger:hover:not(:disabled) { background: var(--red-tint); }
+    .btn-sm { padding: 5px 9px; font-size: 12px; }
 
-    main { max-width: 1260px; margin: 0 auto; padding: 26px 28px 72px; }
-    .view { display: none; }
-    .view.active { display: block; animation: viewIn 220ms var(--ease-out); }
-    @keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    /* Main Workspace Container */
+    .workspace { flex: 1; min-height: 0; position: relative; }
+    .view { display: none; height: 100%; }
+    .view.active { display: flex; }
 
-    /* Presets Library */
-    .toolbar {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 16px; flex-wrap: wrap; margin-bottom: 22px;
+    /* ================= GALLERY VIEW (PRESETS) ================= */
+    #view-presets {
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 28px 36px 56px;
     }
-    .toolbar h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.025em; }
-    .toolbar p { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
-    .toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .gallery-inner { max-width: 1160px; width: 100%; margin: 0 auto; }
+    .gallery-head {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 16px; margin-bottom: 24px;
+    }
+    .gallery-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; }
+    .gallery-head p { font-size: 13px; color: var(--label-secondary); margin-top: 4px; }
+    .gallery-actions { display: flex; gap: 8px; }
 
-    .grid {
+    .gallery-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(256px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
       gap: 20px;
     }
-    .preset-card {
+    .face-tile {
+      background: var(--sidebar);
+      border: 1px solid var(--hairline);
+      border-radius: 18px;
+      padding: 22px 16px 16px;
+      display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px;
+      transition: transform 220ms var(--ease-fluid), border-color 180ms ease, background 180ms ease;
+    }
+    .face-tile:hover {
       background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 20px 18px 16px;
-      display: flex; flex-direction: column; align-items: center;
-      text-align: center; gap: 12px;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-      transition: border-color 180ms ease, transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
-    }
-    .preset-card:hover {
-      border-color: var(--border-strong);
+      border-color: var(--hairline-strong);
       transform: translateY(-2px);
-      box-shadow: var(--shadow-md);
     }
-    .thumb-wrap {
-      position: relative;
-      width: 172px; height: 172px;
-      display: grid; place-items: center;
-    }
-    .watch-thumb {
-      width: 168px; height: 168px; border-radius: 50%;
-      background: #000;
-      border: 6px solid #1e242f;
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1.5px #2e3747, 0 12px 26px rgba(0,0,0,0.58);
+    .tile-watch {
+      width: 158px; height: 158px; border-radius: 50%; background: #000;
+      border: 6px solid #262629;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 12px 28px rgba(0,0,0,0.6);
       overflow: hidden;
     }
-    .watch-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .preset-meta h3 { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; }
-    .preset-meta .sub { font-size: 12px; color: var(--text-secondary); margin-top: 3px; min-height: 32px; }
-    .size-tag {
-      font-size: 11px; font-weight: 500; color: var(--text-muted);
-      padding: 3px 9px; border-radius: 999px;
-      background: var(--surface-raised); border: 1px solid var(--border);
-    }
-    .card-actions { display: flex; gap: 6px; width: 100%; flex-wrap: wrap; margin-top: 2px; }
-    .card-actions .btn-primary { flex: 1 1 100%; }
-    .card-actions .btn-sm { flex: 1; }
+    .tile-watch img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .tile-info h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .tile-info p { font-size: 12px; color: var(--label-secondary); margin-top: 3px; min-height: 32px; }
+    .tile-size { font-size: 11px; color: var(--label-tertiary); }
+    .tile-actions { display: flex; gap: 6px; width: 100%; flex-wrap: wrap; }
+    .tile-actions .btn-primary { flex: 1 1 100%; padding: 7px 12px; }
+    .tile-actions .btn-sm { flex: 1; }
 
-    /* Empty State */
-    .empty-state {
+    .empty-gallery {
       grid-column: 1 / -1;
-      padding: 64px 24px; text-align: center;
-      border: 1px dashed var(--border-strong); border-radius: var(--radius-lg);
-      background: rgba(16, 20, 28, 0.5);
+      padding: 72px 24px; text-align: center;
+      border-radius: 18px; background: var(--sidebar); border: 1px solid var(--hairline);
     }
-    .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-    .empty-state p { font-size: 13px; color: var(--text-secondary); margin-bottom: 18px; }
+    .empty-gallery h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .empty-gallery p { font-size: 13px; color: var(--label-secondary); margin-bottom: 18px; }
 
-    /* Designer Workspace */
-    .templates-strip {
-      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      margin-bottom: 20px;
+    /* ================= STUDIO VIEW (3-PANE MACOS APP) ================= */
+    #view-designer {
+      display: none;
+      grid-template-columns: 236px 1fr 312px;
+      height: 100%;
     }
-    .templates-label { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-right: 4px; }
+    #view-designer.active { display: grid; }
 
-    .designer {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      gap: 28px;
-      align-items: start;
+    /* Left Layers & Templates Sidebar */
+    .left-rail {
+      background: var(--sidebar);
+      border-right: 1px solid var(--hairline);
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+      padding: 14px 10px;
+      gap: 20px;
     }
-    @media (max-width: 940px) {
-      .designer { grid-template-columns: 1fr; }
-      header { flex-wrap: wrap; }
+    .rail-group-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
+      color: var(--label-tertiary);
+      padding: 0 10px 6px;
     }
+    .layer-list, .tpl-list { display: flex; flex-direction: column; gap: 2px; }
 
-    /* Hardware Watch 4S Stage */
-    .stage-panel {
-      position: sticky; top: 82px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 24px 22px 20px;
-      display: flex; flex-direction: column; align-items: center; gap: 16px;
-      box-shadow: var(--shadow-md);
+    .layer-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 10px; border-radius: 8px;
+      cursor: pointer; color: var(--label-secondary);
+      transition: background 120ms ease, color 120ms ease;
+      user-select: none;
     }
-    .watch-hardware {
+    .layer-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--label); }
+    .layer-item.selected { background: var(--blue-tint); color: #fff; font-weight: 500; }
+    .layer-item-left { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+    .layer-item.selected svg { color: var(--blue-hover); }
+
+    .tpl-btn {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; padding: 7px 10px; border: none; border-radius: 7px;
+      background: transparent; color: var(--label-secondary);
+      font-family: inherit; font-size: 12.5px; text-align: left;
+      cursor: pointer; transition: background 120ms ease, color 120ms ease, transform 100ms ease-out;
+    }
+    .tpl-btn:hover { background: rgba(255, 255, 255, 0.06); color: var(--label); }
+    .tpl-btn:active { transform: scale(0.98); }
+    .tpl-swatch { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2); }
+
+    /* Center Watch Hero Stage */
+    .canvas-stage {
       position: relative;
-      padding: 8px 18px 8px 8px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 24px;
+      padding: 24px;
+      background: radial-gradient(520px 520px at 50% 45%, rgba(255, 255, 255, 0.035), transparent 72%), var(--bg);
+      overflow: hidden;
+    }
+
+    .watch-chassis {
+      position: relative;
+      padding: 8px 20px 8px 8px;
       display: flex; align-items: center; justify-content: center;
     }
-    /* Physical rotating crown + side button silhouette matching Haylou Watch 4S */
     .hw-crown {
-      position: absolute; right: 5px; top: 76px;
-      width: 11px; height: 42px; border-radius: 0 5px 5px 0;
-      background: linear-gradient(180deg, #3c4657, #232a35 50%, #384152);
-      border: 1px solid rgba(255,255,255,0.14); border-left: none;
-      box-shadow: 2px 3px 8px rgba(0,0,0,0.6);
+      position: absolute; right: 5px; top: 88px;
+      width: 12px; height: 46px; border-radius: 0 5px 5px 0;
+      background: repeating-linear-gradient(180deg, #3a3a3e 0px, #3a3a3e 2px, #242426 2px, #242426 4px);
+      border: 1px solid rgba(255,255,255,0.16); border-left: none;
+      box-shadow: 3px 4px 10px rgba(0,0,0,0.65);
     }
     .hw-button {
-      position: absolute; right: 7px; bottom: 78px;
-      width: 9px; height: 32px; border-radius: 0 4px 4px 0;
-      background: linear-gradient(180deg, #323a48, #1e242f);
-      border: 1px solid rgba(255,255,255,0.1); border-left: none;
-      box-shadow: 2px 3px 6px rgba(0,0,0,0.55);
+      position: absolute; right: 7px; bottom: 88px;
+      width: 9px; height: 34px; border-radius: 0 4px 4px 0;
+      background: linear-gradient(180deg, #36363a, #202022);
+      border: 1px solid rgba(255,255,255,0.12); border-left: none;
+      box-shadow: 2px 4px 8px rgba(0,0,0,0.55);
     }
     .watch-bezel {
-      width: 296px; height: 296px; border-radius: 50%;
+      width: 332px; height: 332px; border-radius: 50%;
       background: #000;
-      border: 12px solid #1a202a;
+      border: 14px solid #1e1e21;
       box-shadow:
-        inset 0 0 0 1px rgba(255,255,255,0.08),
-        0 0 0 2px #2f3848,
+        inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+        0 0 0 1.5px #333338,
         var(--shadow-watch);
       overflow: hidden;
       position: relative;
@@ -277,493 +299,498 @@
     .drag-overlay { position: absolute; inset: 0; cursor: grab; z-index: 5; }
     .drag-overlay:active { cursor: grabbing; }
     .snap-v, .snap-h {
-      position: absolute; background: rgba(34, 197, 94, 0.7); pointer-events: none; display: none; z-index: 6;
+      position: absolute; background: rgba(10, 132, 255, 0.75); pointer-events: none; display: none; z-index: 6;
     }
     .snap-v { top: 0; bottom: 0; left: 50%; width: 1px; }
     .snap-h { left: 0; right: 0; top: 50%; height: 1px; }
     .coord-hud {
-      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
       padding: 4px 10px; border-radius: 999px;
-      background: rgba(8, 10, 14, 0.88); border: 1px solid var(--border-strong);
-      font-size: 11px; font-weight: 600; color: #86efac;
-      pointer-events: none; opacity: 0; transition: opacity 140ms ease; z-index: 7;
+      background: rgba(20, 20, 22, 0.88); backdrop-filter: blur(12px);
+      border: 1px solid var(--hairline-strong);
+      font-size: 11px; font-weight: 600; color: var(--label);
+      pointer-events: none; opacity: 0; transition: opacity 120ms ease; z-index: 7;
     }
     .coord-hud.show { opacity: 1; }
 
-    .drag-bar { display: flex; gap: 6px; width: 100%; justify-content: center; flex-wrap: wrap; }
+    /* Floating Apple Translucent Action Dock */
+    .floating-dock {
+      display: inline-flex; align-items: center; gap: 10px; flex-wrap: nowrap; justify-content: center;
+      padding: 7px 10px;
+      border-radius: 13px;
+      background: rgba(28, 28, 30, 0.82);
+      backdrop-filter: blur(22px) saturate(180%);
+      border: 1px solid var(--hairline);
+      border-top-color: var(--catchlight);
+      box-shadow: var(--shadow-dock);
+    }
+    .dock-input {
+      width: 185px; padding: 6px 10px; border-radius: 7px;
+      border: 1px solid var(--hairline-strong);
+      background: rgba(0, 0, 0, 0.35); color: var(--label);
+      font-family: inherit; font-size: 12.5px;
+    }
+    .dock-input:focus { border-color: var(--blue); outline: none; }
+    .dock-divider { width: 1px; height: 22px; background: var(--hairline-strong); }
+
+    .drag-seg {
+      display: inline-flex; padding: 2px; border-radius: 7px;
+      background: rgba(0, 0, 0, 0.35); border: 1px solid var(--hairline);
+    }
     .drag-chip {
-      padding: 5px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 500;
-      border: 1px solid var(--border); background: var(--surface-raised); color: var(--text-secondary);
-      cursor: pointer; transition: all 140ms ease;
+      padding: 4px 9px; border: none; border-radius: 5px;
+      background: transparent; color: var(--label-secondary);
+      font-family: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer;
     }
-    .drag-chip:hover { color: var(--text); }
-    .drag-chip.active { border-color: rgba(34,197,94,0.45); color: #86efac; background: var(--accent-tint); }
-    .drag-chip:active { transform: scale(0.96); }
+    .drag-chip.active { background: #36363a; color: var(--label); font-weight: 600; }
 
-    .stage-status { font-size: 11.5px; color: var(--text-muted); }
+    .stage-meta {
+      position: absolute; bottom: 14px; left: 20px; right: 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11.5px; color: var(--label-tertiary); pointer-events: none;
+    }
+    .stage-meta a { pointer-events: auto; color: var(--blue-hover); text-underline-offset: 3px; }
 
-    .save-area {
-      width: 100%; display: flex; flex-direction: column; gap: 10px;
-      padding-top: 14px; border-top: 1px solid var(--border);
+    /* Right Native macOS Inspector */
+    .inspector {
+      background: var(--sidebar);
+      border-left: 1px solid var(--hairline);
+      overflow-y: auto;
+      padding: 18px 18px 36px;
     }
-    .save-area input[type="text"] {
-      width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong); background: var(--surface-raised);
-      color: var(--text); font-family: inherit; font-size: 13.5px;
-      transition: border-color 140ms ease;
-    }
-    .save-area input[type="text"]:focus { border-color: var(--accent); outline: none; }
-
-    /* Layer Accordion Sections */
-    .layers { display: flex; flex-direction: column; gap: 12px; }
-    details.layer {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
-      transition: border-color 160ms ease;
-    }
-    details.layer[open] { border-color: var(--border-strong); }
-    details.layer summary {
-      list-style: none; padding: 13px 18px; cursor: pointer;
+    .insp-pane { display: none; flex-direction: column; gap: 18px; }
+    .insp-pane.active { display: flex; }
+    .insp-header {
       display: flex; align-items: center; justify-content: space-between;
-      background: var(--surface-raised);
-      font-size: 13.5px; font-weight: 600;
-      user-select: none;
+      padding-bottom: 12px; border-bottom: 1px solid var(--hairline);
     }
-    details.layer summary::-webkit-details-marker { display: none; }
-    .layer-title { display: inline-flex; align-items: center; gap: 10px; }
-    .layer-title svg { color: var(--text-secondary); }
-    .layer-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+    .insp-header h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+    .insp-section { display: flex; flex-direction: column; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--hairline); }
+    .insp-section:last-child { border-bottom: none; }
+    .insp-label { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--label-tertiary); }
 
-    /* iOS-style Pill Toggle Switch */
-    .switch {
-      position: relative; display: inline-flex; align-items: center; gap: 8px;
-      cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-secondary);
-    }
-    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-    .switch-track {
-      width: 36px; height: 20px; border-radius: 99px;
-      background: #283344; border: 1px solid rgba(255,255,255,0.08);
-      position: relative; transition: background 180ms var(--ease-out);
-    }
-    .switch-track::after {
-      content: ""; position: absolute; top: 2px; left: 2px;
-      width: 14px; height: 14px; border-radius: 50%; background: #cbd5e1;
-      transition: transform 200ms var(--ease-out), background 180ms ease;
-    }
-    .switch input:checked + .switch-track { background: var(--accent); border-color: var(--accent); }
-    .switch input:checked + .switch-track::after { transform: translateX(16px); background: #fff; }
+    .prop-row { display: flex; flex-direction: column; gap: 6px; }
+    .prop-row label { display: flex; justify-content: space-between; font-size: 12px; color: var(--label-secondary); }
+    .prop-row label span { color: var(--label); font-weight: 500; }
+    .prop-inline { display: flex; gap: 8px; align-items: center; }
+    .prop-inline > * { flex: 1; }
 
-    /* Form Controls */
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-    .field { flex: 1; min-width: 120px; display: flex; flex-direction: column; gap: 6px; }
-    .field label { font-size: 12px; font-weight: 500; color: var(--text-secondary); display: flex; justify-content: space-between; }
-    .field select, .field input[type="text"] {
-      padding: 8px 10px; border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong); background: var(--surface-raised);
-      color: var(--text); font-family: inherit; font-size: 13px;
+    select, input[type="text"] {
+      width: 100%; padding: 7px 10px; border-radius: 7px;
+      border: 1px solid var(--hairline-strong);
+      background: var(--surface-elevated); color: var(--label);
+      font-family: inherit; font-size: 12.5px;
     }
-    .field input[type="color"] {
-      width: 100%; height: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-      background: var(--surface-raised); cursor: pointer; padding: 3px;
+    input[type="color"] {
+      width: 100%; height: 32px; border-radius: 7px;
+      border: 1px solid var(--hairline-strong);
+      background: var(--surface-elevated); cursor: pointer; padding: 2px;
     }
 
-    /* Custom Precision Range Sliders */
+    /* Native Apple-style Slider */
     input[type="range"] {
-      -webkit-appearance: none; appearance: none; width: 100%; height: 5px;
-      border-radius: 99px; background: #263142; outline: none; cursor: pointer;
+      -webkit-appearance: none; appearance: none;
+      width: 100%; height: 4px; border-radius: 99px;
+      background: #3a3a3c; outline: none; cursor: pointer;
     }
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none;
-      width: 15px; height: 15px; border-radius: 50%;
-      background: #f8fafc; border: 2px solid var(--accent);
-      box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-      transition: transform 120ms ease-out;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+      transition: transform 100ms ease-out;
     }
-    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.14); }
-    input[type="range"]::-webkit-slider-thumb:active { transform: scale(1.04); }
+    input[type="range"]::-webkit-slider-thumb:active { transform: scale(1.12); }
+
+    /* Native Apple Switch */
+    .switch { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .switch-track {
+      width: 32px; height: 18px; border-radius: 99px;
+      background: #39393d; transition: background 180ms var(--ease-fluid); position: relative;
+    }
+    .switch-track::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px; border-radius: 50%; background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      transition: transform 200ms var(--ease-fluid);
+    }
+    .switch input:checked + .switch-track { background: var(--blue); }
+    .switch input:checked + .switch-track::after { transform: translateX(14px); }
 
     .dropzone {
-      border: 1.5px dashed rgba(255,255,255,0.18); border-radius: var(--radius-md);
-      padding: 18px; text-align: center; cursor: pointer;
-      background: rgba(22, 28, 38, 0.55); font-size: 12.5px; color: var(--text-secondary);
-      transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+      border: 1px dashed var(--hairline-strong); border-radius: 10px;
+      padding: 18px 12px; text-align: center; cursor: pointer;
+      background: rgba(255, 255, 255, 0.025);
+      font-size: 12px; color: var(--label-secondary);
+      transition: border-color 140ms ease, background 140ms ease;
     }
-    .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-tint); color: var(--text); }
+    .dropzone:hover, .dropzone.drag { border-color: var(--blue); background: var(--blue-tint); color: var(--label); }
 
-    .swatches { display: flex; gap: 9px; flex-wrap: wrap; }
+    .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
     .sw {
-      width: 26px; height: 26px; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.22); cursor: pointer;
-      transition: transform 140ms var(--ease-out), border-color 140ms ease;
+      width: 24px; height: 24px; border-radius: 50%;
+      border: 1.5px solid rgba(255, 255, 255, 0.25); cursor: pointer;
+      transition: transform 140ms var(--ease-fluid);
     }
     .sw:hover { transform: scale(1.14); border-color: #fff; }
-    .sw:active { transform: scale(0.95); }
+    .sw:active { transform: scale(0.94); }
 
-    /* Toast Notification */
+    /* Translucent Floating Toast */
     #toast {
-      position: fixed; bottom: 24px; right: 24px; max-width: 420px;
-      padding: 13px 16px; border-radius: var(--radius-md);
-      background: rgba(22, 28, 38, 0.96); backdrop-filter: blur(12px);
-      border: 1px solid rgba(34, 197, 94, 0.45);
-      color: var(--text); font-size: 13px; font-weight: 500;
-      box-shadow: var(--shadow-md);
+      position: fixed; bottom: 20px; right: 20px; max-width: 390px;
+      padding: 11px 16px; border-radius: 11px;
+      background: rgba(34, 34, 38, 0.92); backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid var(--hairline-strong);
+      border-top-color: var(--catchlight);
+      color: var(--label); font-size: 12.5px; font-weight: 500;
+      box-shadow: var(--shadow-dock);
       opacity: 0; pointer-events: none;
-      transform: translateY(10px) scale(0.98);
-      transition: opacity 200ms var(--ease-out), transform 220ms var(--ease-out);
+      transform: translateY(8px) scale(0.98);
+      transition: opacity 180ms var(--ease-fluid), transform 200ms var(--ease-fluid);
       z-index: 60;
     }
     #toast.show { opacity: 1; pointer-events: auto; transform: translateY(0) scale(1); }
-    #toast.err { border-color: rgba(239, 68, 68, 0.6); }
+    #toast.err { border-color: rgba(255, 69, 58, 0.55); }
 
+    @media (max-width: 960px) {
+      html, body { height: auto; overflow: auto; }
+      #view-designer.active { display: flex; flex-direction: column; height: auto; }
+      .left-rail, .inspector { border: none; border-bottom: 1px solid var(--hairline); }
+      .watch-bezel { width: 272px; height: 272px; }
+    }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+    @media (prefers-reduced-transparency: reduce) {
+      header, .floating-dock, #toast { backdrop-filter: none; background: #1c1c1e; }
     }
   </style>
 </head>
 <body>
   <header>
-    <div class="brand">
-      <div class="brand-mark" aria-hidden="true">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="7" /><polyline points="12 9 12 12 14 13.5" /><path d="M16.51 17.35l-.35 3.83a2 2 0 0 1-2 1.82H9.83a2 2 0 0 1-2-1.82l-.35-3.83m.01-10.7l.35-3.83A2 2 0 0 1 9.83 1h4.35a2 2 0 0 1 2 1.82l.35 3.83" />
+    <div class="title-left">
+      <div class="app-glyph" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="7" /><polyline points="12 9 12 12 14 13.5" />
         </svg>
       </div>
-      <div>
-        <h1>Haylou Watch 4S Studio</h1>
-        <p>466×466 AMOLED · Native .bin Watchface Designer</p>
-      </div>
+      <span class="app-title">Watch 4S Studio</span>
+      <span class="app-sub">466×466</span>
     </div>
 
-    <div class="segmented" role="tablist" id="segmentedNav">
-      <div class="seg-indicator" id="segIndicator"></div>
-      <button class="seg-btn active" role="tab" data-tab="presets" onclick="switchTab('presets')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        Saved Presets
-      </button>
-      <button class="seg-btn" role="tab" data-tab="designer" onclick="switchTab('designer')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-        Visual Designer
-      </button>
+    <div class="segmented" role="tablist">
+      <div class="seg-pill" id="segPill"></div>
+      <button class="seg-btn active" role="tab" data-tab="presets" onclick="switchTab('presets')">Gallery</button>
+      <button class="seg-btn" role="tab" data-tab="designer" onclick="switchTab('designer')">Studio</button>
     </div>
 
-    <div class="header-actions">
-      <div id="adbPill" class="adb-pill"><span class="adb-dot"></span><span id="adbText">Checking ADB...</span></div>
-      <button class="btn" id="installApkBtn" onclick="installApk()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Install APK
-      </button>
+    <div class="title-right">
+      <div id="adbPill" class="status-chip"><span class="status-dot"></span><span id="adbText">Checking ADB...</span></div>
+      <button class="btn btn-quiet btn-sm" id="installApkBtn" onclick="installApk()">Install APK</button>
     </div>
   </header>
 
-  <main>
-    <!-- SAVED PRESETS VIEW -->
+  <div class="workspace">
+    <!-- GALLERY VIEW -->
     <section id="view-presets" class="view active">
-      <div class="toolbar">
-        <div>
-          <h2>Watchface Presets</h2>
-          <p>Push any preset over ADB, then tap Sync on any free cloud dial in Haylou Fun.</p>
+      <div class="gallery-inner">
+        <div class="gallery-head">
+          <div>
+            <h2>Watch Faces</h2>
+            <p>Push a face over ADB, then tap Sync on any free cloud dial in Haylou Fun.</p>
+          </div>
+          <div class="gallery-actions">
+            <button class="btn" onclick="document.getElementById('importBinInput').click()">Import .bin</button>
+            <input type="file" id="importBinInput" accept=".bin" style="display:none" onchange="importBinFile(this.files[0])" />
+            <button class="btn btn-primary" onclick="newWatchface()">New Watch Face</button>
+          </div>
         </div>
-        <div class="toolbar-actions">
-          <button class="btn" onclick="document.getElementById('importBinInput').click()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            Import .bin
-          </button>
-          <input type="file" id="importBinInput" accept=".bin" style="display:none" onchange="importBinFile(this.files[0])" />
-          <button class="btn btn-primary" onclick="newWatchface()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            New Watchface
-          </button>
-        </div>
+        <div id="presetsGrid" class="gallery-grid"></div>
       </div>
-      <div id="presetsGrid" class="grid"></div>
     </section>
 
-    <!-- VISUAL DESIGNER VIEW -->
+    <!-- 3-PANE STUDIO VIEW -->
     <section id="view-designer" class="view">
-      <div class="templates-strip">
-        <span class="templates-label">Starters</span>
-        <button class="btn btn-sm" onclick="applyTemplate('pure')">Pure Photo</button>
-        <button class="btn btn-sm" onclick="applyTemplate('stacked_neon')">Stacked Neon</button>
-        <button class="btn btn-sm" onclick="applyTemplate('omni_af')">Alien Force</button>
-        <button class="btn btn-sm" onclick="applyTemplate('omni_os')">Original Series</button>
-        <button class="btn btn-sm" onclick="applyTemplate('omni_ov')">Omniverse</button>
-        <button class="btn btn-sm" onclick="applyTemplate('omni_5yl')">5YL</button>
-        <button class="btn btn-sm" onclick="applyTemplate('luxury')">Classic Analog</button>
-      </div>
-
-      <div class="designer">
-        <!-- LEFT: WATCH 4S HARDWARE STAGE -->
-        <div class="stage-panel">
-          <div class="watch-hardware">
-            <div class="watch-bezel" id="watchBezel">
-              <img id="livePreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='466' height='466' viewBox='0 0 466 466'%3E%3Crect width='466' height='466' fill='%23080a0e'/%3E%3C/svg%3E" alt="Live Watch 4S preview" />
-              <div class="drag-overlay" id="dragOverlay"></div>
-              <div class="snap-v" id="snapV"></div>
-              <div class="snap-h" id="snapH"></div>
-              <div class="coord-hud tabular" id="coordHud">233, 233</div>
-            </div>
-            <div class="hw-crown" aria-hidden="true"></div>
-            <div class="hw-button" aria-hidden="true"></div>
-          </div>
-
-          <div class="drag-bar">
-            <span style="font-size:11.5px; color:var(--text-muted); align-self:center;">Drag on face:</span>
-            <button class="drag-chip active" data-drag="clock" onclick="setDragTarget('clock')">Clock</button>
-            <button class="drag-chip" data-drag="weekday" onclick="setDragTarget('weekday')">Weekday</button>
-            <button class="drag-chip" data-drag="battery" onclick="setDragTarget('battery')">Battery Bar</button>
-          </div>
-
-          <div class="stage-status tabular" id="renderStatus">Pixel-exact 466×466 preview</div>
-
-          <div class="save-area">
-            <input type="text" id="presetName" placeholder="Preset name" value="Alien Force Omnitrix" />
-            <div class="row">
-              <button class="btn" id="saveBtn" onclick="savePreset(false)">Save Preset</button>
-              <button class="btn btn-primary" id="savePushBtn" onclick="savePreset(true)">Save &amp; Push</button>
-            </div>
-            <div id="editingBadge" style="display:none; font-size:11.5px; color:#86efac; text-align:center;">
-              Editing saved preset · <a href="#" style="color:#fff; text-underline-offset:3px;" onclick="clearEditMode(); return false;">Save as new</a>
-            </div>
-          </div>
-        </div>
-
-        <!-- RIGHT: LAYER INSPECTOR -->
-        <div class="layers">
-          <!-- BACKGROUND -->
-          <details class="layer" open>
-            <summary>
-              <span class="layer-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      <!-- LEFT SIDEBAR: LAYERS & TEMPLATES -->
+      <aside class="left-rail">
+        <div>
+          <div class="rail-group-title">Layers</div>
+          <div class="layer-list">
+            <div class="layer-item selected" data-layer="background" onclick="selectLayer('background')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                 Background
               </span>
-            </summary>
-            <div class="layer-body">
-              <div class="field">
-                <label>Source</label>
-                <select id="bgMode" onchange="syncBgUI(); schedulePreview();">
-                  <option value="omnitrix">Ben 10 Omnitrix Faceplate</option>
-                  <option value="image">Custom Photo / Artwork</option>
-                  <option value="solid">Solid / Vertical Gradient</option>
-                </select>
-              </div>
-
-              <div class="row">
-                <div class="field">
-                  <label>AMOLED Brightness <span class="tabular" id="bgBrightVal">100%</span></label>
-                  <input type="range" id="bgBright" min="15" max="100" step="5" value="100" oninput="document.getElementById('bgBrightVal').textContent=this.value+'%'; schedulePreview()" />
-                </div>
-                <div class="field">
-                  <label>Dark Edge Vignette <span class="tabular" id="bgVigVal">0%</span></label>
-                  <input type="range" id="bgVig" min="0" max="80" step="5" value="0" oninput="document.getElementById('bgVigVal').textContent=this.value+'%'; schedulePreview()" />
-                </div>
-              </div>
-
-              <div id="bgImageOpts" style="display:none;">
-                <div class="dropzone" id="dropzone" onclick="document.getElementById('bgFileInput').click()">
-                  Drop PNG, JPG, or WEBP here — or click to browse
-                  <input type="file" id="bgFileInput" accept="image/*" style="display:none" />
-                </div>
-              </div>
-
-              <div id="bgSolidOpts" style="display:none;" class="row">
-                <div class="field"><label>Top Color</label><input type="color" id="bgCol1" value="#0a0f1c" oninput="schedulePreview()" /></div>
-                <div class="field"><label>Bottom Color</label><input type="color" id="bgCol2" value="#1a1033" oninput="schedulePreview()" /></div>
-              </div>
-
-              <div id="bgOmniOpts" style="display:flex; flex-direction:column; gap:12px;">
-                <div class="row">
-                  <div class="field">
-                    <label>Series</label>
-                    <select id="omniStyle" onchange="schedulePreview()">
-                      <option value="alien_force">Alien Force / UAF</option>
-                      <option value="os">Original Series</option>
-                      <option value="omniverse">Omniverse</option>
-                      <option value="5yl">5 Years Later (5YL)</option>
-                    </select>
-                  </div>
-                  <div class="field" style="max-width:110px;">
-                    <label>Core Color</label>
-                    <input type="color" id="omniHex" value="#39ff14" oninput="onOmniColorPick(this.value)" />
-                  </div>
-                </div>
-                <div class="field">
-                  <label>Colorways</label>
-                  <div class="swatches">
-                    <button type="button" class="sw" style="background:#39ff14" title="Classic Green" onclick="onOmniColorPick('#39ff14')"></button>
-                    <button type="button" class="sw" style="background:#ff1e2d" title="Albedo Red" onclick="onOmniColorPick('#ff1e2d')"></button>
-                    <button type="button" class="sw" style="background:#00e5ff" title="Ben 23 Cyan" onclick="onOmniColorPick('#00e5ff')"></button>
-                    <button type="button" class="sw" style="background:#ff4fd8" title="Gwen 10 Pink" onclick="onOmniColorPick('#ff4fd8')"></button>
-                    <button type="button" class="sw" style="background:#ff7b00" title="Mad Ben Orange" onclick="onOmniColorPick('#ff7b00')"></button>
-                    <button type="button" class="sw" style="background:#c8d6e5" title="Nega Ben Silver" onclick="onOmniColorPick('#c8d6e5')"></button>
-                  </div>
-                </div>
-                <div class="row">
-                  <div class="field">
-                    <label>Glow Intensity <span class="tabular" id="omniGlowVal">1.0</span></label>
-                    <input type="range" id="omniGlow" min="0" max="2" step="0.1" value="1.0" oninput="document.getElementById('omniGlowVal').textContent=this.value; schedulePreview()" />
-                  </div>
-                  <label class="switch" style="padding-bottom:6px;">
-                    <input type="checkbox" id="omniTicks" checked onchange="schedulePreview()" />
-                    <span class="switch-track"></span>
-                    Bezel Ticks
-                  </label>
-                </div>
-              </div>
             </div>
-          </details>
-
-          <!-- DIGITAL CLOCK -->
-          <details class="layer">
-            <summary>
-              <span class="layer-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M8 10v4M12 10h.01M12 14h.01M16 10v4"/></svg>
+            <div class="layer-item" data-layer="clock" onclick="selectLayer('clock')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M8 10v4M16 10v4"/></svg>
                 Digital Clock
               </span>
-              <label class="switch" onclick="event.stopPropagation()">
-                <input type="checkbox" id="clkEnabled" onchange="schedulePreview()" />
-                <span class="switch-track"></span>
-              </label>
-            </summary>
-            <div class="layer-body">
-              <div class="row">
-                <div class="field">
-                  <label>Layout</label>
-                  <select id="clkLayout" onchange="schedulePreview()">
-                    <option value="horizontal">Horizontal (HH MM)</option>
-                    <option value="stacked">Stacked Vertical (HH / MM)</option>
-                  </select>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="clkEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div class="layer-item" data-layer="hands" onclick="selectLayer('hands')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+                Analog Hands
+              </span>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="handEnabled" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div class="layer-item" data-layer="battery" onclick="selectLayer('battery')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="18" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
+                Battery
+              </span>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="battEnabled" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div class="layer-item" data-layer="weekday" onclick="selectLayer('weekday')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Weekday
+              </span>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="wkEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="rail-group-title">Templates</div>
+          <div class="tpl-list">
+            <button class="tpl-btn" onclick="applyTemplate('pure')">Pure Photo <span class="tpl-swatch" style="background:#3a3a3c"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('stacked_neon')">Stacked Neon <span class="tpl-swatch" style="background:#00f0ff"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_af')">Omnitrix · Alien Force <span class="tpl-swatch" style="background:#39ff14"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_os')">Omnitrix · Original <span class="tpl-swatch" style="background:#c5ccc9"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_ov')">Omnitrix · Omniverse <span class="tpl-swatch" style="background:#eef2f4"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_5yl')">Omnitrix · 5YL <span class="tpl-swatch" style="background:#26d85a"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('luxury')">Classic Analog <span class="tpl-swatch" style="background:#f59e0b"></span></button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER: HERO WATCH 4S STAGE -->
+      <section class="canvas-stage">
+        <div class="watch-chassis">
+          <div class="watch-bezel" id="watchBezel">
+            <img id="livePreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='466' height='466' viewBox='0 0 466 466'%3E%3Crect width='466' height='466' fill='%230b0b0d'/%3E%3C/svg%3E" alt="Watch 4S live preview" />
+            <div class="drag-overlay" id="dragOverlay"></div>
+            <div class="snap-v" id="snapV"></div>
+            <div class="snap-h" id="snapH"></div>
+            <div class="coord-hud tabular" id="coordHud">233, 233</div>
+          </div>
+          <div class="hw-crown" aria-hidden="true"></div>
+          <div class="hw-button" aria-hidden="true"></div>
+        </div>
+
+        <div class="floating-dock">
+          <div class="drag-seg" title="Layer to drag on watch">
+            <button class="drag-chip active" data-drag="clock" onclick="setDragTarget('clock')">Clock</button>
+            <button class="drag-chip" data-drag="weekday" onclick="setDragTarget('weekday')">Weekday</button>
+            <button class="drag-chip" data-drag="battery" onclick="setDragTarget('battery')">Battery</button>
+          </div>
+          <div class="dock-divider"></div>
+          <input class="dock-input" type="text" id="presetName" placeholder="Watch face name" value="Alien Force Omnitrix" />
+          <button class="btn" id="saveBtn" onclick="savePreset(false)">Save</button>
+          <button class="btn btn-primary" id="savePushBtn" onclick="savePreset(true)">Save &amp; Push</button>
+        </div>
+
+        <div class="stage-meta">
+          <span class="tabular" id="renderStatus">466×466 AMOLED · Ready</span>
+          <span id="editingBadge" style="display:none;">Editing preset · <a href="#" onclick="clearEditMode(); return false;">Save as copy</a></span>
+        </div>
+      </section>
+
+      <!-- RIGHT: CONTEXT-SENSITIVE INSPECTOR -->
+      <aside class="inspector">
+        <!-- INSPECTOR: BACKGROUND -->
+        <div class="insp-pane active" id="insp-background">
+          <div class="insp-header"><h3>Background</h3></div>
+          <div class="insp-section">
+            <div class="prop-row">
+              <label>Source</label>
+              <select id="bgMode" onchange="syncBgUI(); schedulePreview();">
+                <option value="omnitrix">Ben 10 Omnitrix</option>
+                <option value="image">Custom Photo</option>
+                <option value="solid">Solid / Gradient</option>
+              </select>
+            </div>
+            <div id="bgImageOpts" style="display:none;">
+              <div class="dropzone" id="dropzone" onclick="document.getElementById('bgFileInput').click()">
+                Drop PNG, JPG, or WEBP here — or click to browse
+                <input type="file" id="bgFileInput" accept="image/*" style="display:none" />
+              </div>
+            </div>
+            <div id="bgSolidOpts" style="display:none;" class="prop-inline">
+              <div class="prop-row"><label>Top</label><input type="color" id="bgCol1" value="#0a0f1c" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Bottom</label><input type="color" id="bgCol2" value="#1a1033" oninput="schedulePreview()" /></div>
+            </div>
+            <div id="bgOmniOpts" style="display:flex; flex-direction:column; gap:12px;">
+              <div class="prop-row">
+                <label>Series</label>
+                <select id="omniStyle" onchange="schedulePreview()">
+                  <option value="alien_force">Alien Force / UAF</option>
+                  <option value="os">Original Series</option>
+                  <option value="omniverse">Omniverse</option>
+                  <option value="5yl">5 Years Later</option>
+                </select>
+              </div>
+              <div class="prop-row">
+                <label>Colorway</label>
+                <div class="swatches">
+                  <button type="button" class="sw" style="background:#39ff14" title="Ben Green" onclick="onOmniColorPick('#39ff14')"></button>
+                  <button type="button" class="sw" style="background:#ff1e2d" title="Albedo Red" onclick="onOmniColorPick('#ff1e2d')"></button>
+                  <button type="button" class="sw" style="background:#00e5ff" title="Ben 23 Cyan" onclick="onOmniColorPick('#00e5ff')"></button>
+                  <button type="button" class="sw" style="background:#ff4fd8" title="Gwen 10 Pink" onclick="onOmniColorPick('#ff4fd8')"></button>
+                  <button type="button" class="sw" style="background:#ff7b00" title="Mad Ben Orange" onclick="onOmniColorPick('#ff7b00')"></button>
+                  <button type="button" class="sw" style="background:#c8d6e5" title="Nega Ben Silver" onclick="onOmniColorPick('#c8d6e5')"></button>
                 </div>
-                <div class="field">
-                  <label>Typeface</label>
-                  <select id="clkFont" onchange="schedulePreview()"></select>
-                </div>
-                <button class="btn btn-sm" type="button" onclick="document.getElementById('fontUploadInput').click()">Upload .ttf</button>
+              </div>
+              <div class="prop-inline">
+                <div class="prop-row"><label>Custom Color</label><input type="color" id="omniHex" value="#39ff14" oninput="onOmniColorPick(this.value)" /></div>
+                <div class="prop-row"><label>Glow <span class="tabular" id="omniGlowVal">1.0</span></label><input type="range" id="omniGlow" min="0" max="2" step="0.1" value="1.0" oninput="document.getElementById('omniGlowVal').textContent=this.value; schedulePreview()" /></div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:12px; color:var(--label-secondary);">Bezel Indices</span>
+                <label class="switch"><input type="checkbox" id="omniTicks" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="insp-section">
+            <div class="insp-label">AMOLED Output</div>
+            <div class="prop-row">
+              <label>Brightness <span class="tabular" id="bgBrightVal">100%</span></label>
+              <input type="range" id="bgBright" min="15" max="100" step="5" value="100" oninput="document.getElementById('bgBrightVal').textContent=this.value+'%'; schedulePreview()" />
+            </div>
+            <div class="prop-row">
+              <label>Edge Vignette <span class="tabular" id="bgVigVal">0%</span></label>
+              <input type="range" id="bgVig" min="0" max="80" step="5" value="0" oninput="document.getElementById('bgVigVal').textContent=this.value+'%'; schedulePreview()" />
+            </div>
+          </div>
+        </div>
+
+        <!-- INSPECTOR: DIGITAL CLOCK -->
+        <div class="insp-pane" id="insp-clock">
+          <div class="insp-header"><h3>Digital Clock</h3></div>
+          <div class="insp-section">
+            <div class="prop-row">
+              <label>Layout</label>
+              <select id="clkLayout" onchange="schedulePreview()">
+                <option value="horizontal">Horizontal (HH MM)</option>
+                <option value="stacked">Stacked Vertical (HH / MM)</option>
+              </select>
+            </div>
+            <div class="prop-row">
+              <label>Typeface</label>
+              <div class="prop-inline">
+                <select id="clkFont" onchange="schedulePreview()"></select>
+                <button class="btn btn-sm" style="flex:0 0 auto;" type="button" onclick="document.getElementById('fontUploadInput').click()">Upload .ttf</button>
                 <input type="file" id="fontUploadInput" accept=".ttf,.otf" style="display:none" onchange="uploadFont(this.files[0])" />
               </div>
-
-              <div class="row">
-                <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 115)">Top</button>
-                <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 233)">Center</button>
-                <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 365)">Bottom</button>
-              </div>
-
-              <div class="row">
-                <div class="field"><label>X <span class="tabular" id="clkXVal">233</span></label><input type="range" id="clkX" min="80" max="386" value="233" oninput="document.getElementById('clkXVal').textContent=this.value; schedulePreview()" /></div>
-                <div class="field"><label>Y <span class="tabular" id="clkYVal">233</span></label><input type="range" id="clkY" min="60" max="406" value="233" oninput="document.getElementById('clkYVal').textContent=this.value; schedulePreview()" /></div>
-                <div class="field"><label>Size <span class="tabular" id="clkSizeVal">64px</span></label><input type="range" id="clkSize" min="28" max="92" value="64" oninput="document.getElementById('clkSizeVal').textContent=this.value+'px'; schedulePreview()" /></div>
-              </div>
-
-              <div class="row">
-                <div class="field"><label>Top Color</label><input type="color" id="clkCol1" value="#ffffff" oninput="schedulePreview()" /></div>
-                <div class="field"><label>Gradient Bottom</label><input type="color" id="clkCol2" value="#39ff14" oninput="schedulePreview()" /></div>
-                <div class="field"><label>Outline</label><input type="color" id="clkStrokeCol" value="#000000" oninput="schedulePreview()" /></div>
-              </div>
-
-              <div class="row">
-                <div class="field"><label>Stroke <span class="tabular" id="clkStrokeVal">2px</span></label><input type="range" id="clkStroke" min="0" max="6" value="2" oninput="document.getElementById('clkStrokeVal').textContent=this.value+'px'; schedulePreview()" /></div>
-                <div class="field"><label>Glow <span class="tabular" id="clkGlowVal">4px</span></label><input type="range" id="clkGlow" min="0" max="12" value="4" oninput="document.getElementById('clkGlowVal').textContent=this.value+'px'; schedulePreview()" /></div>
-                <div class="field"><label>Spacing <span class="tabular" id="clkGapVal">6px</span></label><input type="range" id="clkGap" min="0" max="24" value="6" oninput="document.getElementById('clkGapVal').textContent=this.value+'px'; schedulePreview()" /></div>
-              </div>
             </div>
-          </details>
-
-          <!-- ANALOG HANDS -->
-          <details class="layer" open>
-            <summary>
-              <span class="layer-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
-                Analog Hands (60Hz)
-              </span>
-              <label class="switch" onclick="event.stopPropagation()">
-                <input type="checkbox" id="handEnabled" checked onchange="schedulePreview()" />
-                <span class="switch-track"></span>
-              </label>
-            </summary>
-            <div class="layer-body">
-              <div class="row">
-                <div class="field">
-                  <label>Hand Pack</label>
-                  <select id="handStyle" onchange="schedulePreview()">
-                    <option value="omnitrix">Omnitrix (Hour Dot · Minute Bar · Rim Sec)</option>
-                    <option value="classic">Classic Tapered Needles</option>
-                    <option value="neon">Neon Pointers</option>
-                    <option value="minimal">Minimalist Baton</option>
-                  </select>
-                </div>
-                <div class="field" style="max-width:98px;"><label>Primary</label><input type="color" id="handCol1" value="#39ff14" oninput="schedulePreview()" /></div>
-                <div class="field" style="max-width:98px;"><label>Accent</label><input type="color" id="handCol2" value="#ebffe6" oninput="schedulePreview()" /></div>
-              </div>
-              <div class="row" style="gap:20px;">
-                <label class="switch"><input type="checkbox" id="handSec" checked onchange="schedulePreview()" /><span class="switch-track"></span>Second Hand</label>
-                <label class="switch"><input type="checkbox" id="handCap" onchange="schedulePreview()" /><span class="switch-track"></span>Center Cap</label>
-              </div>
+            <div class="prop-row">
+              <label>Size <span class="tabular" id="clkSizeVal">64px</span></label>
+              <input type="range" id="clkSize" min="28" max="92" value="64" oninput="document.getElementById('clkSizeVal').textContent=this.value+'px'; schedulePreview()" />
             </div>
-          </details>
-
-          <!-- BATTERY WIDGET -->
-          <details class="layer">
-            <summary>
-              <span class="layer-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="18" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
-                Battery Indicator
-              </span>
-              <label class="switch" onclick="event.stopPropagation()">
-                <input type="checkbox" id="battEnabled" checked onchange="schedulePreview()" />
-                <span class="switch-track"></span>
-              </label>
-            </summary>
-            <div class="layer-body">
-              <div class="row">
-                <div class="field">
-                  <label>Style</label>
-                  <select id="battStyle" onchange="schedulePreview()">
-                    <option value="ring">Outer Circular Ring (360°)</option>
-                    <option value="arc">Bottom Curved Arc</option>
-                    <option value="bar">Horizontal Bar</option>
-                    <option value="icon">Battery Pill Icon</option>
-                  </select>
-                </div>
-                <div class="field" style="max-width:98px;"><label>Color</label><input type="color" id="battCol" value="#39ff14" oninput="schedulePreview()" /></div>
-                <div class="field"><label>Weight <span class="tabular" id="battThickVal">6px</span></label><input type="range" id="battThick" min="3" max="12" value="6" oninput="document.getElementById('battThickVal').textContent=this.value+'px'; schedulePreview()" /></div>
-              </div>
-              <div class="row">
-                <div class="field"><label>Bar/Icon X <span class="tabular" id="battXVal">233</span></label><input type="range" id="battX" min="60" max="406" value="233" oninput="document.getElementById('battXVal').textContent=this.value; schedulePreview()" /></div>
-                <div class="field"><label>Bar/Icon Y <span class="tabular" id="battYVal">405</span></label><input type="range" id="battY" min="50" max="420" value="405" oninput="document.getElementById('battYVal').textContent=this.value; schedulePreview()" /></div>
-              </div>
+            <div class="prop-row">
+              <label>Spacing <span class="tabular" id="clkGapVal">6px</span></label>
+              <input type="range" id="clkGap" min="0" max="24" value="6" oninput="document.getElementById('clkGapVal').textContent=this.value+'px'; schedulePreview()" />
             </div>
-          </details>
+          </div>
 
-          <!-- WEEKDAY WIDGET -->
-          <details class="layer">
-            <summary>
-              <span class="layer-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                Weekday Label
-              </span>
-              <label class="switch" onclick="event.stopPropagation()">
-                <input type="checkbox" id="wkEnabled" onchange="schedulePreview()" />
-                <span class="switch-track"></span>
-              </label>
-            </summary>
-            <div class="layer-body">
-              <div class="row">
-                <div class="field"><label>Typeface</label><select id="wkFont" onchange="schedulePreview()"></select></div>
-                <div class="field"><label>Size <span class="tabular" id="wkSizeVal">24px</span></label><input type="range" id="wkSize" min="16" max="44" value="24" oninput="document.getElementById('wkSizeVal').textContent=this.value+'px'; schedulePreview()" /></div>
-                <div class="field" style="max-width:95px;"><label>Color</label><input type="color" id="wkCol" value="#ffffff" oninput="schedulePreview()" /></div>
-              </div>
-              <div class="row">
-                <div class="field"><label>X <span class="tabular" id="wkXVal">233</span></label><input type="range" id="wkX" min="60" max="406" value="233" oninput="document.getElementById('wkXVal').textContent=this.value; schedulePreview()" /></div>
-                <div class="field"><label>Y <span class="tabular" id="wkYVal">95</span></label><input type="range" id="wkY" min="50" max="420" value="95" oninput="document.getElementById('wkYVal').textContent=this.value; schedulePreview()" /></div>
-                <label class="switch" style="padding-bottom:6px;"><input type="checkbox" id="wkUpper" checked onchange="schedulePreview()" /><span class="switch-track"></span>UPPERCASE</label>
-              </div>
+          <div class="insp-section">
+            <div class="insp-label">Position</div>
+            <div class="prop-inline">
+              <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 115)">Top</button>
+              <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 233)">Center</button>
+              <button class="btn btn-sm" type="button" onclick="setPos('clk', 233, 365)">Bottom</button>
             </div>
-          </details>
+            <div class="prop-row"><label>X <span class="tabular" id="clkXVal">233</span></label><input type="range" id="clkX" min="80" max="386" value="233" oninput="document.getElementById('clkXVal').textContent=this.value; schedulePreview()" /></div>
+            <div class="prop-row"><label>Y <span class="tabular" id="clkYVal">233</span></label><input type="range" id="clkY" min="60" max="406" value="233" oninput="document.getElementById('clkYVal').textContent=this.value; schedulePreview()" /></div>
+          </div>
+
+          <div class="insp-section">
+            <div class="insp-label">Appearance</div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Top</label><input type="color" id="clkCol1" value="#ffffff" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Bottom</label><input type="color" id="clkCol2" value="#39ff14" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Stroke</label><input type="color" id="clkStrokeCol" value="#000000" oninput="schedulePreview()" /></div>
+            </div>
+            <div class="prop-row"><label>Outline <span class="tabular" id="clkStrokeVal">2px</span></label><input type="range" id="clkStroke" min="0" max="6" value="2" oninput="document.getElementById('clkStrokeVal').textContent=this.value+'px'; schedulePreview()" /></div>
+            <div class="prop-row"><label>Glow <span class="tabular" id="clkGlowVal">4px</span></label><input type="range" id="clkGlow" min="0" max="12" value="4" oninput="document.getElementById('clkGlowVal').textContent=this.value+'px'; schedulePreview()" /></div>
+          </div>
         </div>
-      </div>
+
+        <!-- INSPECTOR: ANALOG HANDS -->
+        <div class="insp-pane" id="insp-hands">
+          <div class="insp-header"><h3>Analog Hands</h3></div>
+          <div class="insp-section">
+            <div class="prop-row">
+              <label>Style</label>
+              <select id="handStyle" onchange="schedulePreview()">
+                <option value="omnitrix">Omnitrix (Dot · Bar · Rim)</option>
+                <option value="classic">Classic Needles</option>
+                <option value="neon">Neon Pointers</option>
+                <option value="minimal">Minimalist Baton</option>
+              </select>
+            </div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Primary</label><input type="color" id="handCol1" value="#39ff14" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Accent</label><input type="color" id="handCol2" value="#ebffe6" oninput="schedulePreview()" /></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Second Hand</span>
+              <label class="switch"><input type="checkbox" id="handSec" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Center Cap</span>
+              <label class="switch"><input type="checkbox" id="handCap" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- INSPECTOR: BATTERY -->
+        <div class="insp-pane" id="insp-battery">
+          <div class="insp-header"><h3>Battery</h3></div>
+          <div class="insp-section">
+            <div class="prop-row">
+              <label>Style</label>
+              <select id="battStyle" onchange="schedulePreview()">
+                <option value="ring">Outer Circular Ring</option>
+                <option value="arc">Bottom Arc Gauge</option>
+                <option value="bar">Horizontal Bar</option>
+                <option value="icon">Battery Icon</option>
+              </select>
+            </div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Color</label><input type="color" id="battCol" value="#39ff14" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Weight <span class="tabular" id="battThickVal">6px</span></label><input type="range" id="battThick" min="3" max="12" value="6" oninput="document.getElementById('battThickVal').textContent=this.value+'px'; schedulePreview()" /></div>
+            </div>
+            <div class="prop-row"><label>Bar/Icon X <span class="tabular" id="battXVal">233</span></label><input type="range" id="battX" min="60" max="406" value="233" oninput="document.getElementById('battXVal').textContent=this.value; schedulePreview()" /></div>
+            <div class="prop-row"><label>Bar/Icon Y <span class="tabular" id="battYVal">405</span></label><input type="range" id="battY" min="50" max="420" value="405" oninput="document.getElementById('battYVal').textContent=this.value; schedulePreview()" /></div>
+          </div>
+        </div>
+
+        <!-- INSPECTOR: WEEKDAY -->
+        <div class="insp-pane" id="insp-weekday">
+          <div class="insp-header"><h3>Weekday</h3></div>
+          <div class="insp-section">
+            <div class="prop-row"><label>Typeface</label><select id="wkFont" onchange="schedulePreview()"></select></div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Color</label><input type="color" id="wkCol" value="#ffffff" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Size <span class="tabular" id="wkSizeVal">24px</span></label><input type="range" id="wkSize" min="16" max="44" value="24" oninput="document.getElementById('wkSizeVal').textContent=this.value+'px'; schedulePreview()" /></div>
+            </div>
+            <div class="prop-row"><label>X <span class="tabular" id="wkXVal">233</span></label><input type="range" id="wkX" min="60" max="406" value="233" oninput="document.getElementById('wkXVal').textContent=this.value; schedulePreview()" /></div>
+            <div class="prop-row"><label>Y <span class="tabular" id="wkYVal">95</span></label><input type="range" id="wkY" min="50" max="420" value="95" oninput="document.getElementById('wkYVal').textContent=this.value; schedulePreview()" /></div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Uppercase</span>
+              <label class="switch"><input type="checkbox" id="wkUpper" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+          </div>
+        </div>
+      </aside>
     </section>
-  </main>
+  </div>
 
   <div id="toast" role="status" aria-live="polite"></div>
 
@@ -778,26 +805,32 @@
       el.textContent = msg;
       el.className = isErr ? "show err" : "show";
       clearTimeout(window._tt);
-      window._tt = setTimeout(() => el.className = "", 4800);
+      window._tt = setTimeout(() => el.className = "", 4600);
     }
 
-    function updateSegIndicator() {
+    function updateSegPill() {
       const active = document.querySelector(".seg-btn.active");
-      const ind = document.getElementById("segIndicator");
-      if (!active || !ind) return;
-      ind.style.width = active.offsetWidth + "px";
-      ind.style.transform = `translateX(${active.offsetLeft - 4}px)`;
+      const pill = document.getElementById("segPill");
+      if (!active || !pill) return;
+      pill.style.width = active.offsetWidth + "px";
+      pill.style.transform = `translateX(${active.offsetLeft - 3}px)`;
     }
 
     function switchTab(name) {
-      document.querySelectorAll(".seg-btn").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+      document.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
       document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + name));
-      updateSegIndicator();
+      updateSegPill();
       if (name === "presets") loadPresets();
       if (name === "designer") schedulePreview(0);
     }
 
-    window.addEventListener("resize", updateSegIndicator);
+    function selectLayer(name) {
+      document.querySelectorAll(".layer-item").forEach(el => el.classList.toggle("selected", el.dataset.layer === name));
+      document.querySelectorAll(".insp-pane").forEach(p => p.classList.toggle("active", p.id === "insp-" + name));
+      if (name === "clock" || name === "weekday" || name === "battery") setDragTarget(name);
+    }
+
+    window.addEventListener("resize", updateSegPill);
     document.addEventListener("keydown", e => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         if (document.getElementById("view-designer").classList.contains("active")) {
@@ -812,7 +845,7 @@
         const r = await fetch("/api/adb-status");
         const d = await r.json();
         const pill = document.getElementById("adbPill");
-        document.getElementById("adbText").textContent = d.connected ? ("ADB · " + d.model) : (d.detail || "No USB device");
+        document.getElementById("adbText").textContent = d.connected ? d.model : "No USB device";
         pill.classList.toggle("ok", !!d.connected);
       } catch {}
     }
@@ -850,26 +883,24 @@
       const grid = document.getElementById("presetsGrid");
       if (!d.presets.length) {
         grid.innerHTML = `
-          <div class="empty-state">
-            <h3>No saved watchfaces yet</h3>
-            <p>Design a pure-image dial, custom digital clock, or Ben 10 Omnitrix in Visual Designer.</p>
-            <button class="btn btn-primary" onclick="newWatchface()">Create First Watchface</button>
+          <div class="empty-gallery">
+            <h3>No Watch Faces Yet</h3>
+            <p>Create a pure-image dial, custom digital clock, or Ben 10 Omnitrix in Studio.</p>
+            <button class="btn btn-primary" onclick="newWatchface()">Create Watch Face</button>
           </div>`;
         return;
       }
       grid.innerHTML = d.presets.map(p => `
-        <article class="preset-card">
-          <div class="thumb-wrap">
-            <div class="watch-thumb"><img src="${p.preview_url}" alt="${p.name}" loading="lazy" /></div>
-          </div>
-          <div class="preset-meta">
+        <article class="face-tile">
+          <div class="tile-watch"><img src="${p.preview_url}" alt="${p.name}" loading="lazy" /></div>
+          <div class="tile-info">
             <h3>${p.name}</h3>
-            <div class="sub">${p.subtitle || ""}</div>
+            <p>${p.subtitle || ""}</p>
           </div>
-          <span class="size-tag tabular">${p.size_kb} KB · .bin</span>
-          <div class="card-actions">
+          <span class="tile-size tabular">${p.size_kb} KB</span>
+          <div class="tile-actions">
             <button class="btn btn-primary" onclick="pushPreset('${p.id}', this)">Push to Watch</button>
-            ${p.editable ? `<button class="btn btn-sm" onclick="editPreset('${p.id}')">Edit</button>` : ""}
+            <button class="btn btn-sm" onclick="editPreset('${p.id}')">Edit</button>
             <button class="btn btn-sm" onclick="duplicatePreset('${p.id}')">Copy</button>
             <button class="btn btn-sm btn-danger" onclick="deletePreset('${p.id}')">Delete</button>
           </div>
@@ -893,9 +924,9 @@
     }
 
     async function deletePreset(id) {
-      if (!confirm("Delete this saved watchface preset?")) return;
+      if (!confirm("Delete this saved watch face?")) return;
       await fetch("/api/delete-preset", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id }) });
-      toast("Preset removed."); loadPresets();
+      toast("Watch face deleted."); loadPresets();
     }
 
     async function importBinFile(file) {
@@ -1066,37 +1097,38 @@
       clearEditMode();
       if (t === "pure") {
         document.getElementById("presetName").value = "Pure Custom Photo";
-        loadConfigIntoUI({ background: { mode: "image", image_data: inlineBgData }, digital_clock: { enabled: false }, analog_hands: { enabled: false }, battery: { enabled: false }, weekday: { enabled: false } });
+        loadConfigIntoUI({ background: { mode: "image", image_data: inlineBgData, brightness: 70, vignette: 15 }, digital_clock: { enabled: false }, analog_hands: { enabled: false }, battery: { enabled: false }, weekday: { enabled: false } });
       } else if (t === "stacked_neon") {
-        document.getElementById("presetName").value = "Stacked Neon Digital";
+        document.getElementById("presetName").value = "Stacked Neon";
         loadConfigIntoUI({
-          background: { mode: "solid", color: "#070b14", color2: "#160a2c" },
+          background: { mode: "solid", color: "#070b14", color2: "#160a2c", brightness: 100, vignette: 0 },
           digital_clock: { enabled: true, layout: "stacked", x: 233, y: 235, font_size: 82, color: "#ffffff", color2: "#00f0ff", stroke_width: 2, stroke_color: "#000000", glow_radius: 6, spacing: 8 },
           analog_hands: { enabled: false },
           battery: { enabled: true, style: "ring", color: "#00f0ff", thickness: 6 },
           weekday: { enabled: true, x: 233, y: 74, font_size: 24, color: "#00f0ff", uppercase: true }
         });
       } else if (t.startsWith("omni_")) {
-        const map = { omni_af: ["alien_force", "Omnitrix · Alien Force"], omni_os: ["os", "Omnitrix · Original Series"], omni_ov: ["omniverse", "Omnitrix · Omniverse"], omni_5yl: ["5yl", "Omnitrix · 5YL"] };
+        const map = { omni_af: ["alien_force", "Alien Force Omnitrix"], omni_os: ["os", "Original Series Omnitrix"], omni_ov: ["omniverse", "Omniverse Omnitrix"], omni_5yl: ["5yl", "5YL Omnitrix"] };
         const [st, title] = map[t];
         document.getElementById("presetName").value = title;
         loadConfigIntoUI({
-          background: { mode: "omnitrix", omni_style: st, omni_hex: "#39ff14", omni_glow: 1.0, omni_ticks: true },
+          background: { mode: "omnitrix", omni_style: st, omni_hex: "#39ff14", omni_glow: 1.0, omni_ticks: true, brightness: 85, vignette: 0 },
           digital_clock: { enabled: false },
           analog_hands: { enabled: true, style: "omnitrix", color: "#39ff14", accent_color: "#ebffe6", show_seconds: true, center_cap: false },
           battery: { enabled: true, style: "ring", color: "#39ff14", thickness: 6 },
           weekday: { enabled: false }
         });
       } else if (t === "luxury") {
-        document.getElementById("presetName").value = "Classic Dark Analog";
+        document.getElementById("presetName").value = "Classic Analog";
         loadConfigIntoUI({
-          background: { mode: "solid", color: "#0c1018", color2: "#1c2432" },
+          background: { mode: "solid", color: "#0c1018", color2: "#1c2432", brightness: 100, vignette: 20 },
           digital_clock: { enabled: false },
           analog_hands: { enabled: true, style: "classic", color: "#f59e0b", accent_color: "#f8fafc", show_seconds: true, center_cap: true },
           battery: { enabled: true, style: "arc", color: "#f59e0b", thickness: 5 },
           weekday: { enabled: true, x: 233, y: 120, font_size: 22, color: "#e2e8f0", uppercase: true }
         });
       }
+      selectLayer("background");
       schedulePreview(0);
     }
 
@@ -1120,14 +1152,14 @@
         if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
         img.src = url;
         img.dataset.url = url;
-        st.textContent = "Pixel-exact 466×466 preview";
+        st.textContent = "466×466 AMOLED · Live";
       } catch { st.textContent = "Preview offline"; }
     }
 
     async function savePreset(push) {
       const b1 = document.getElementById("saveBtn"), b2 = document.getElementById("savePushBtn");
       b1.disabled = b2.disabled = true;
-      toast(push ? "Compiling Watch 4S .bin & pushing..." : "Compiling Watch 4S .bin...");
+      toast(push ? "Compiling .bin & pushing..." : "Compiling .bin...");
       try {
         const r = await fetch("/api/save-preset", {
           method: "POST", headers: {"Content-Type": "application/json"},
@@ -1151,8 +1183,9 @@
       if (!d.ok) { toast(d.error, true); return; }
       editingPresetId = d.id;
       document.getElementById("presetName").value = d.name;
-      document.getElementById("editingBadge").style.display = "block";
+      document.getElementById("editingBadge").style.display = "inline";
       loadConfigIntoUI(d.config);
+      selectLayer("background");
       switchTab("designer");
     }
 
@@ -1163,7 +1196,6 @@
 
     function newWatchface() { clearEditMode(); switchTab("designer"); }
 
-    // 1:1 Pointer Capture Drag with Magnetic Center Snap & Coordinate HUD
     function setDragTarget(t) {
       dragTarget = t;
       document.querySelectorAll(".drag-chip").forEach(b => b.classList.toggle("active", b.dataset.drag === t));
@@ -1228,7 +1260,13 @@
 
     refreshAdb();
     setInterval(refreshAdb, 5000);
-    loadFonts().then(() => { syncBgUI(); loadPresets(); updateSegIndicator(); });
+    loadFonts().then(() => {
+      syncBgUI();
+      loadPresets();
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("tab") === "designer") switchTab("designer");
+      else updateSegPill();
+    });
   </script>
 </body>
 </html>
