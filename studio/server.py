@@ -111,7 +111,7 @@ def list_presets():
                     meta = json.load(f)
                 meta["id"] = pid
                 meta["size_kb"] = round(os.path.getsize(bin_path) / 1024.0, 1)
-                meta["editable"] = os.path.exists(os.path.join(pdir, "config.json"))
+                meta["editable"] = True
                 meta["preview_url"] = f"/presets/{pid}/preview.png?t={int(os.path.getmtime(bin_path))}"
                 items.append(meta)
             except Exception:
@@ -206,15 +206,43 @@ class StudioHandler(BaseHTTPRequestHandler):
             pdir = os.path.join(PRESETS_DIR, pid)
             cfg_path = os.path.join(pdir, "config.json")
             meta_path = os.path.join(pdir, "meta.json")
-            if not pid or ".." in pid or not os.path.exists(cfg_path):
-                self.send_json({"ok": False, "error": "Editable config not found for this preset."}, 404)
+            if not pid or ".." in pid or not os.path.isdir(pdir):
+                self.send_json({"ok": False, "error": "Preset not found."}, 404)
                 return
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            name = pid
+            meta = {}
             if os.path.exists(meta_path):
                 with open(meta_path, "r", encoding="utf-8") as f:
-                    name = json.load(f).get("name", pid)
+                    meta = json.load(f)
+            name = meta.get("name", pid)
+
+            # Auto-migrate legacy or imported presets that don't have config.json yet
+            if not os.path.exists(cfg_path):
+                if meta.get("type") == "omnitrix" or "omnitrix" in pid.lower():
+                    cfg = {
+                        "background": {"mode": "omnitrix", "omni_style": "alien_force", "omni_hex": "#39ff14", "omni_glow": 1.0, "omni_ticks": True, "brightness": 100, "vignette": 0},
+                        "digital_clock": {"enabled": False},
+                        "analog_hands": {"enabled": True, "style": "omnitrix", "color": "#39ff14", "accent_color": "#ebffe6", "show_seconds": True, "center_cap": False},
+                        "battery": {"enabled": True, "style": "ring", "color": "#39ff14", "thickness": 6},
+                        "weekday": {"enabled": False},
+                    }
+                else:
+                    src_img = os.path.join(pdir, "source.png")
+                    prev_img = os.path.join(pdir, "preview.png")
+                    if not os.path.exists(src_img) and os.path.exists(prev_img):
+                        shutil.copy2(prev_img, src_img)
+                    cfg = {
+                        "background": {"mode": "image", "image_path": src_img, "brightness": 100, "vignette": 0},
+                        "digital_clock": {"enabled": False},
+                        "analog_hands": {"enabled": False},
+                        "battery": {"enabled": False},
+                        "weekday": {"enabled": False},
+                    }
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=2)
+            else:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+
             # Include source image as data URI if present
             src_img = os.path.join(pdir, "source.png")
             if os.path.exists(src_img):
