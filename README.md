@@ -43,7 +43,7 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 
 ## Requirements
 
-- **Python 3.9+** and **Pillow** (`pip install -r requirements.txt`)
+- **Python 3.9+** and **Pillow 10.2+** (`pip install -r requirements.txt`)
 - **Android Debug Bridge (`adb`)** in your `PATH` + Android phone with **USB Debugging** enabled
 - **Android SDK Build-Tools** (`zipalign` and `apksigner`) + Java `keytool` *(only needed once to patch your own copy of Haylou Fun)*
 - Your own copy of the official **Haylou Fun v4.0.8 APK** *(not redistributed in this repository)*
@@ -74,11 +74,14 @@ adb install -r haylou-fun-v4-0-8-noclock.apk
 
 ### 3. Launch Haylou Watch 4S Studio
 - **Windows:** Double-click `launch_studio.bat`
-- **macOS / Linux / CLI:**
-  ```bash
-  python studio/server.py
-  ```
-Your browser will open at **http://127.0.0.1:8466**.
+- **macOS / Linux:** `./launch_studio.sh` (or `python3 studio/server.py`)
+
+Your browser will open at **http://127.0.0.1:8466**. If the port is busy, set
+`STUDIO_PORT=8467`; set `STUDIO_LOG=1` to log requests to the terminal.
+
+On first launch an inline guide walks you through the four-step workflow. You can
+reopen it with the **?** button in the title bar. Dials can be exported and shared as
+single `.face.zip` packages and imported again from the Gallery.
 
 ### 4. Apply Any Watchface to Your Watch 4S
 1. In **Haylou Watch 4S Studio**, click **Save & Push** (or **Push to Watch** on any saved preset).
@@ -163,7 +166,7 @@ haylou-watch4s-watchface-maker/
 
 ## Disclaimer
 
-This is an independent community project not affiliated with Dongguan Liesheng Electronic Co., Ltd. (Haylou). No proprietary APKs, firmware, or copyrighted assets are included in this repository. Use at your own discretion.
+This is an independent community project not affiliated with Dongguan Liesheng Electronic Co., Ltd. (Haylou). No proprietary APKs, firmware, or copyrighted assets are included in this repository. Ben 10 / Omnitrix and Fallout / Pip-Boy are trademarks of their respective owners; their names are used here descriptively for fan-made dial templates, with no endorsement or affiliation. Use at your own discretion.
 
 ## License
 

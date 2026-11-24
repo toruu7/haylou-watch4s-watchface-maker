@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -23,8 +23,9 @@
       --label-tertiary: #98989d;
 
       /* Apple System Accents */
-      --blue: #0a84ff;
-      --blue-hover: #409cff;
+      --blue: #0071e3;
+      --blue-hover: #0066cc;
+      --blue-text: #409cff;
       --blue-tint: rgba(10, 132, 255, 0.16);
       --green: #30d158;
       --red: #ff453a;
@@ -79,7 +80,7 @@
       display: grid; place-items: center; color: var(--label);
     }
     .app-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.015em; }
-    .app-sub { font-size: 11.5px; color: var(--label-tertiary); margin-left: 2px; }
+    .app-sub { font-size: 12px; color: var(--label-tertiary); margin-left: 2px; }
 
     /* Apple Segmented Control */
     .segmented {
@@ -193,7 +194,7 @@
     .tile-watch img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .tile-info h3 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
     .tile-info p { font-size: 12px; color: var(--label-secondary); margin-top: 3px; min-height: 32px; }
-    .tile-size { font-size: 11px; color: var(--label-tertiary); }
+    .tile-size { font-size: 12px; color: var(--label-tertiary); }
     .tile-actions { display: flex; gap: 6px; width: 100%; flex-wrap: wrap; }
     .tile-actions .btn-primary { flex: 1 1 100%; padding: 7px 12px; }
     .tile-actions .btn-sm { flex: 1; }
@@ -240,7 +241,7 @@
     .layer-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--label); }
     .layer-item.selected { background: var(--blue-tint); color: #fff; font-weight: 500; }
     .layer-item-left { display: flex; align-items: center; gap: 9px; font-size: 13px; }
-    .layer-item.selected svg { color: var(--blue-hover); }
+    .layer-item.selected svg { color: var(--blue-text); }
 
     .tpl-btn {
       display: flex; align-items: center; justify-content: space-between;
@@ -340,16 +341,16 @@
     .drag-chip {
       padding: 4px 9px; border: none; border-radius: 5px;
       background: transparent; color: var(--label-secondary);
-      font-family: inherit; font-size: 11.5px; font-weight: 500; cursor: pointer;
+      font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
     }
     .drag-chip.active { background: #36363a; color: var(--label); font-weight: 600; }
 
     .stage-meta {
       position: absolute; bottom: 14px; left: 20px; right: 20px;
       display: flex; justify-content: space-between; align-items: center;
-      font-size: 11.5px; color: var(--label-tertiary); pointer-events: none;
+      font-size: 12px; color: var(--label-tertiary); pointer-events: none;
     }
-    .stage-meta a { pointer-events: auto; color: var(--blue-hover); text-underline-offset: 3px; }
+    .stage-meta a { pointer-events: auto; color: var(--blue-text); text-underline-offset: 3px; }
 
     /* Right Native macOS Inspector */
     .inspector {
@@ -465,6 +466,119 @@
     @media (prefers-reduced-transparency: reduce) {
       header, .floating-dock, #toast { backdrop-filter: none; background: #1c1c1e; }
     }
+  
+    /* Top Inspector Layer Navigation Tabs */
+    .insp-tab-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--hairline);
+    }
+    .insp-tab-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted-text, #94a3b8);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .insp-tab-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.18);
+    }
+    .insp-tab-btn.active {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.4);
+      font-weight: 600;
+    }
+    .tile-quick-custom {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .btn-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #94a3b8;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-chip:hover {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+
+    /* Long user-supplied names must never break the gallery grid. */
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .line-clamp {
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; max-width: 100%;
+    }
+    .tile-info, .tile-actions, .gallery-actions { min-width: 0; }
+
+    /* First-run card: inline, dismissible, no focus trap. */
+    .getting-started {
+      display: none;
+      margin-bottom: 22px;
+      padding: 18px 20px;
+      border-radius: 16px;
+      border: 1px solid var(--hairline-strong);
+      background: var(--surface);
+      box-shadow: var(--shadow-dock);
+      animation: gs-in 200ms var(--ease-fluid) both;
+    }
+    .getting-started.visible { display: block; }
+    @keyframes gs-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+    .gs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .gs-head h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+    .gs-head p { font-size: 12.5px; color: var(--label-secondary); margin-top: 3px; max-width: 62ch; }
+    .gs-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 16px 0 4px; }
+    .gs-step {
+      padding: 11px 12px; border-radius: 10px; border: 1px solid var(--hairline);
+      background: rgba(255,255,255,0.03);
+    }
+    .gs-step b { display: block; font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+    .gs-step span { font-size: 12px; color: var(--label-secondary); line-height: 1.4; }
+    .gs-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+    .render-error { color: var(--red) !important; }
+
+    /* Narrow viewports: the gallery is readable even when the designer is not usable. */
+    @media (max-width: 720px) {
+      header { grid-template-columns: auto 1fr auto; gap: 8px; padding: 0 10px; }
+      .app-title { white-space: nowrap; }
+      .app-sub { display: none; }
+      .title-right { gap: 4px; }
+      #adbText { display: block; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #installApkBtn { display: none; }
+      .gallery-inner { padding: 20px 14px 40px; }
+      .gallery-head { flex-direction: column; align-items: stretch; }
+      .gallery-actions { flex-wrap: wrap; justify-content: flex-start; }
+      .getting-started { padding: 16px; }
+      .gs-head { flex-direction: column; gap: 8px; }
+    }
+
   </style>
 </head>
 <body>
@@ -486,8 +600,9 @@
     </div>
 
     <div class="title-right">
-      <div id="adbPill" class="status-chip"><span class="status-dot"></span><span id="adbText">Checking ADB...</span></div>
-      <button class="btn btn-quiet btn-sm" id="installApkBtn" onclick="installApk()">Install APK</button>
+      <div id="adbPill" class="status-chip" title="ADB connection status"><span class="status-dot"></span><span id="adbText">Checking ADB…</span></div>
+      <button class="btn btn-quiet btn-sm" type="button" title="Getting started" aria-label="Show getting started guide" onclick="openOnboarding()">?</button>
+      <button class="btn btn-quiet btn-sm" id="installApkBtn" type="button" onclick="installApk()">Install APK</button>
     </div>
   </header>
 
@@ -495,15 +610,36 @@
     <!-- GALLERY VIEW -->
     <section id="view-presets" class="view active">
       <div class="gallery-inner">
+        <div id="onboardingCard" class="getting-started">
+          <div class="gs-head">
+            <div>
+              <h3>Make your first Watch 4S dial</h3>
+              <p>Design here, push the file to your phone, then install it from Haylou Fun's dial centre. Nothing is flashed — your watch stays reversible.</p>
+            </div>
+            <button class="btn btn-quiet btn-sm" type="button" onclick="dismissOnboarding()">Dismiss</button>
+          </div>
+          <div class="gs-steps">
+            <div class="gs-step"><b>1 · Prepare once</b><span>Patch Haylou Fun v4.0.8 with the bundled script and install it with ADB.</span></div>
+            <div class="gs-step"><b>2 · Design</b><span>Pick a template or start from a photo. Drag elements to place them.</span></div>
+            <div class="gs-step"><b>3 · Save &amp; push</b><span>Connect your phone via USB and let the Studio copy the .bin across.</span></div>
+            <div class="gs-step"><b>4 · Install on watch</b><span>In Haylou Fun, open Dial Center and tap Sync on any free cloud dial.</span></div>
+          </div>
+          <div class="gs-actions">
+            <button class="btn btn-primary btn-sm" type="button" onclick="dismissOnboarding(); newWatchface(); applyTemplate('pure')">Start with a photo</button>
+            <button class="btn btn-sm" type="button" onclick="dismissOnboarding(); newWatchface(); applyTemplate('stacked_neon')">Start from a template</button>
+          </div>
+        </div>
         <div class="gallery-head">
           <div>
             <h2>Watch Faces</h2>
             <p>Push a face over ADB, then tap Sync on any free cloud dial in Haylou Fun.</p>
           </div>
           <div class="gallery-actions">
-            <button class="btn" onclick="document.getElementById('importBinInput').click()">Import .bin</button>
+            <button class="btn" type="button" onclick="document.getElementById('importBundleInput').click()">Import .face</button>
+            <input type="file" id="importBundleInput" accept=".face,.face.zip,.zip" style="display:none" onchange="importBundleFile(this.files[0])" />
+            <button class="btn" type="button" onclick="document.getElementById('importBinInput').click()">Import .bin</button>
             <input type="file" id="importBinInput" accept=".bin" style="display:none" onchange="importBinFile(this.files[0])" />
-            <button class="btn btn-primary" onclick="newWatchface()">New Watch Face</button>
+            <button class="btn btn-primary" type="button" onclick="newWatchface()">New Watch Face</button>
           </div>
         </div>
         <div id="presetsGrid" class="gallery-grid"></div>
@@ -517,39 +653,46 @@
         <div>
           <div class="rail-group-title">Layers</div>
           <div class="layer-list">
-            <div class="layer-item selected" data-layer="background" onclick="selectLayer('background')">
+            <div class="layer-item selected" role="button" tabindex="0" data-layer="background" onclick="selectLayer('background')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                 Background
               </span>
             </div>
-            <div class="layer-item" data-layer="clock" onclick="selectLayer('clock')">
+            <div class="layer-item" role="button" tabindex="0" data-layer="clock" onclick="selectLayer('clock')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M8 10v4M16 10v4"/></svg>
                 Digital Clock
               </span>
               <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="clkEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
             </div>
-            <div class="layer-item" data-layer="hands" onclick="selectLayer('hands')">
+            <div class="layer-item" role="button" tabindex="0" data-layer="hands" onclick="selectLayer('hands')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
                 Analog Hands
               </span>
               <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="handEnabled" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
             </div>
-            <div class="layer-item" data-layer="battery" onclick="selectLayer('battery')">
+            <div class="layer-item" role="button" tabindex="0" data-layer="battery" onclick="selectLayer('battery')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="18" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
                 Battery
               </span>
               <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="battEnabled" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
             </div>
-            <div class="layer-item" data-layer="weekday" onclick="selectLayer('weekday')">
+            <div class="layer-item" role="button" tabindex="0" data-layer="weekday" onclick="selectLayer('weekday')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 Weekday
               </span>
               <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="wkEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div class="layer-item" role="button" tabindex="0" data-layer="telemetry" onclick="selectLayer('telemetry')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Telemetry
+              </span>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="telemEnabled" onchange="document.getElementById('telemMasterEnabled').checked = this.checked; schedulePreview()" /><span class="switch-track"></span></label>
             </div>
           </div>
         </div>
@@ -563,6 +706,14 @@
             <button class="tpl-btn" onclick="applyTemplate('omni_os')">Omnitrix · Original <span class="tpl-swatch" style="background:#c5ccc9"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('omni_ov')">Omnitrix · Omniverse <span class="tpl-swatch" style="background:#eef2f4"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('omni_5yl')">Omnitrix · 5YL <span class="tpl-swatch" style="background:#26d85a"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_heatblast')">Omnitrix · Heatblast <span class="tpl-swatch" style="background:#ff6a00"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_swampfire')">Omnitrix · Swampfire <span class="tpl-swatch" style="background:#39ff14"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_diamondhead')">Omnitrix · Diamondhead <span class="tpl-swatch" style="background:#00f0ff"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_xlr8')">Omnitrix · XLR8 <span class="tpl-swatch" style="background:#00d2ff"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_fourarms')">Omnitrix · Four Arms <span class="tpl-swatch" style="background:#e63946"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_humungousaur')">Omnitrix · Humungousaur <span class="tpl-swatch" style="background:#a3704c"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_timeout')">Omnitrix · Timeout Red <span class="tpl-swatch" style="background:#ff1818"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_self_destruct')">Omnitrix · Self-Destruct <span class="tpl-swatch" style="background:#ffa000"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('luxury')">Classic Analog <span class="tpl-swatch" style="background:#f59e0b"></span></button>
           </div>
         </div>
@@ -573,7 +724,7 @@
         <div class="watch-chassis">
           <div class="watch-bezel" id="watchBezel">
             <img id="livePreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='466' height='466' viewBox='0 0 466 466'%3E%3Crect width='466' height='466' fill='%230b0b0d'/%3E%3C/svg%3E" alt="Watch 4S live preview" />
-            <div class="drag-overlay" id="dragOverlay"></div>
+            <div class="drag-overlay" id="dragOverlay" aria-label="Drag area — use arrow keys to nudge the selected layer"></div>
             <div class="snap-v" id="snapV"></div>
             <div class="snap-h" id="snapH"></div>
             <div class="coord-hud tabular" id="coordHud">233, 233</div>
@@ -602,6 +753,24 @@
 
       <!-- RIGHT: CONTEXT-SENSITIVE INSPECTOR -->
       <aside class="inspector">
+        <!-- TOP LAYER SELECTOR TABS -->
+        <div class="insp-tab-bar">
+          <button type="button" class="insp-tab-btn active" data-layer="background" onclick="selectLayer('background')">
+            🖼 Background
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="clock" onclick="selectLayer('clock')">
+            ⏰ Digital Clock
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="hands" onclick="selectLayer('hands')">
+            ⏱ Hands
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="battery" onclick="selectLayer('battery')">
+            🔋 Battery
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="weekday" onclick="selectLayer('weekday')">
+            📅 Weekday
+          </button>
+        </div>
         <!-- INSPECTOR: BACKGROUND -->
         <div class="insp-pane active" id="insp-background">
           <div class="insp-header"><h3>Background</h3></div>
@@ -610,6 +779,7 @@
               <label>Source</label>
               <select id="bgMode" onchange="syncBgUI(); schedulePreview();">
                 <option value="omnitrix">Ben 10 Omnitrix</option>
+                <option value="pipboy">Fallout Pip-Boy 3000 CRT</option>
                 <option value="image">Custom Photo</option>
                 <option value="solid">Solid / Gradient</option>
               </select>
@@ -624,10 +794,23 @@
               <div class="prop-row"><label>Top</label><input type="color" id="bgCol1" value="#0a0f1c" oninput="schedulePreview()" /></div>
               <div class="prop-row"><label>Bottom</label><input type="color" id="bgCol2" value="#1a1033" oninput="schedulePreview()" /></div>
             </div>
+            <div id="bgPipboyOpts" style="display:none; flex-direction:column; gap:10px; padding:10px; background:rgba(0,0,0,0.25); border-radius:8px; border:1px solid var(--hairline);">
+              <div style="font-size:12px; font-weight:600; color:#89FC03;">Pip-Boy Terminal Labels</div>
+              <div class="prop-inline">
+                <div class="prop-row"><label>Weekday</label><input type="text" id="pipboyWeekday" value="TUESDAY" oninput="schedulePreview()" /></div>
+                <div class="prop-row"><label>Date</label><input type="text" id="pipboyDate" value="11.26.2025" oninput="schedulePreview()" /></div>
+              </div>
+              <div class="prop-inline">
+                <div class="prop-row"><label>Weather Temp</label><input type="text" id="pipboyWeather" value="-10°F" oninput="schedulePreview()" /></div>
+                <div class="prop-row"><label>Battery Label</label><input type="text" id="pipboyBattery" value="100%" oninput="schedulePreview()" /></div>
+              </div>
+              <div class="prop-row"><label>Seconds HUD Mark</label><input type="text" id="pipboySeconds" value="35" oninput="schedulePreview()" /></div>
+            </div>
             <div id="bgOmniOpts" style="display:flex; flex-direction:column; gap:12px;">
               <div class="prop-row">
                 <label>Series</label>
                 <select id="omniStyle" onchange="schedulePreview()">
+                  <option value="alien_select">Alien Select (Diamond)</option>
                   <option value="alien_force">Alien Force / UAF</option>
                   <option value="os">Original Series</option>
                   <option value="omniverse">Omniverse</option>
@@ -635,10 +818,45 @@
                 </select>
               </div>
               <div class="prop-row">
+                <label>Operating Mode</label>
+                <select id="omniMode" onchange="onOmniModeSelect(this.value)">
+                  <option value="green">Active (Green)</option>
+                  <option value="timeout">Recharge / Timeout (Red)</option>
+                  <option value="self_destruct">Self-Destruct (Amber)</option>
+                  <option value="ultimatrix">Ultimatrix (Cyan)</option>
+                  <option value="albedo">Albedo (Crimson)</option>
+                  <option value="carnitrix">Carnitrix (Blood Red)</option>
+                  <option value="ben23">Ben 23 (Electric Blue)</option>
+                  <option value="gwen">Gwen 10 (Magenta)</option>
+                  <option value="mad">Mad Ben (Orange)</option>
+                  <option value="nega">Nega Ben (Silver)</option>
+                </select>
+              </div>
+              <div class="prop-row">
+                <label>Alien Silhouette</label>
+                <select id="omniAlien" onchange="schedulePreview()">
+                  <option value="none">None (Pure Dial)</option>
+                  <option value="heatblast">Heatblast (Pyronite)</option>
+                  <option value="swampfire">Swampfire (Methanosian)</option>
+                  <option value="diamondhead">Diamondhead (Petrosapien)</option>
+                  <option value="xlr8">XLR8 (Kineceleran)</option>
+                  <option value="fourarms">Four Arms (Tetramand)</option>
+                  <option value="humungousaur">Humungousaur (Vaxasaurian)</option>
+                </select>
+              </div>
+              <div class="prop-row">
+                <label>Projection Style</label>
+                <select id="omniAlienStyle" onchange="schedulePreview()">
+                  <option value="shadow">Shadow (Dark Core)</option>
+                  <option value="hologram">Hologram (Glowing Projection)</option>
+                </select>
+              </div>
+              <div class="prop-row">
                 <label>Colorway</label>
                 <div class="swatches">
                   <button type="button" class="sw" style="background:#39ff14" title="Ben Green" onclick="onOmniColorPick('#39ff14')"></button>
-                  <button type="button" class="sw" style="background:#ff1e2d" title="Albedo Red" onclick="onOmniColorPick('#ff1e2d')"></button>
+                  <button type="button" class="sw" style="background:#ff1818" title="Timeout Red" onclick="onOmniColorPick('#ff1818')"></button>
+                  <button type="button" class="sw" style="background:#ffa000" title="Self-Destruct Amber" onclick="onOmniColorPick('#ffa000')"></button>
                   <button type="button" class="sw" style="background:#00e5ff" title="Ben 23 Cyan" onclick="onOmniColorPick('#00e5ff')"></button>
                   <button type="button" class="sw" style="background:#ff4fd8" title="Gwen 10 Pink" onclick="onOmniColorPick('#ff4fd8')"></button>
                   <button type="button" class="sw" style="background:#ff7b00" title="Mad Ben Orange" onclick="onOmniColorPick('#ff7b00')"></button>
@@ -728,7 +946,10 @@
             <div class="prop-row">
               <label>Style</label>
               <select id="handStyle" onchange="schedulePreview()">
-                <option value="omnitrix">Omnitrix (Dot · Bar · Rim)</option>
+                <option value="omnitrix">Omnitrix (Alien Force)</option>
+                <option value="stark_hud">Stark Arc Reactor (Laser Reticle)</option>
+                <option value="dauphine">Skeleton Tourbillon (Faceted Dauphine)</option>
+                <option value="pixel">8-Bit Pixel Weapons</option>
                 <option value="classic">Classic Needles</option>
                 <option value="neon">Neon Pointers</option>
                 <option value="minimal">Minimalist Baton</option>
@@ -756,10 +977,11 @@
             <div class="prop-row">
               <label>Style</label>
               <select id="battStyle" onchange="schedulePreview()">
-                <option value="ring">Outer Circular Ring</option>
+                <option value="ring">Outer Circular Ring (360° Sweep)</option>
                 <option value="arc">Bottom Arc Gauge</option>
                 <option value="bar">Horizontal Bar</option>
                 <option value="icon">Battery Icon</option>
+                <option value="dynamic_2way">2-Way Dynamic Faceplate (>=50% / <50%)</option>
               </select>
             </div>
             <div class="prop-inline">
@@ -788,6 +1010,84 @@
             </div>
           </div>
         </div>
+
+        <!-- INSPECTOR: TELEMETRY -->
+        <div class="insp-pane" id="insp-telemetry">
+          <div class="insp-header">
+            <h3>Health Telemetry</h3>
+            <span class="badge" style="background: rgba(137, 252, 3, 0.15); color: #89FC03; border: 1px solid rgba(137, 252, 3, 0.3); font-size: 11px; padding: 2px 6px; border-radius: 4px;">Sensor fields</span>
+          </div>
+          <div class="insp-section">
+            <div class="prop-row checkbox-row">
+              <label><input type="checkbox" id="telemMasterEnabled" onchange="document.getElementById('telemEnabled').checked = this.checked; schedulePreview();" /> <b>Enable Live Telemetry</b></label>
+            </div>
+            <div class="prop-row">
+              <label>Preset Style</label>
+              <div style="display: flex; gap: 6px; margin-top: 4px;">
+                <button type="button" class="btn-chip" onclick="applyTelemPreset('pipboy')" style="color: #89FC03;">Pip-Boy Green</button>
+                <button type="button" class="btn-chip" onclick="applyTelemPreset('cyberpunk')" style="color: #00F0FF;">Cyberpunk Cyan</button>
+                <button type="button" class="btn-chip" onclick="applyTelemPreset('amber')" style="color: #FFB000;">Amber</button>
+              </div>
+            </div>
+            <div class="prop-inline">
+              <div class="prop-row">
+                <label>Color</label>
+                <input type="color" id="telemCol" value="#89FC03" oninput="schedulePreview()" />
+              </div>
+              <div class="prop-row">
+                <label>Size <span class="tabular" id="telemSizeVal">26px</span></label>
+                <input type="range" id="telemSize" min="16" max="36" value="26" oninput="document.getElementById('telemSizeVal').textContent = this.value + 'px'; schedulePreview();" />
+              </div>
+            </div>
+            <div class="prop-row">
+              <label>Alignment</label>
+              <select id="telemAlign" onchange="schedulePreview()">
+                <option value="2" selected>Right-Aligned (Anchored at X)</option>
+                <option value="0">Left-Aligned</option>
+                <option value="1">Centered</option>
+              </select>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--hairline);">
+              <div style="font-size: 12px; font-weight: 600; color: var(--label); margin-bottom: 8px;">Telemetry Widgets</div>
+              
+              <!-- Calories -->
+              <div style="margin-bottom: 8px;">
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>🔥 Calories (0x0108)</span>
+                  <input type="checkbox" id="telemCalEnabled" checked onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemCalX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemCalY" value="142" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Heart Rate -->
+              <div style="margin-bottom: 8px;">
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>❤️ Heart Rate / BPM (0x0106)</span>
+                  <input type="checkbox" id="telemBpmEnabled" checked onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemBpmX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemBpmY" value="207" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Steps -->
+              <div>
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>👟 Steps (0x0107)</span>
+                  <input type="checkbox" id="telemStepsEnabled" checked onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemStepsX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemStepsY" value="272" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </aside>
     </section>
   </div>
@@ -795,10 +1095,56 @@
   <div id="toast" role="status" aria-live="polite"></div>
 
   <script>
+    
+    function applyTelemPreset(style) {
+      if (style === "pipboy") {
+        document.getElementById("telemCol").value = "#89FC03";
+        document.getElementById("telemCalX").value = 180;
+        document.getElementById("telemCalY").value = 142;
+        document.getElementById("telemBpmX").value = 180;
+        document.getElementById("telemBpmY").value = 207;
+        document.getElementById("telemStepsX").value = 180;
+        document.getElementById("telemStepsY").value = 272;
+        document.getElementById("telemAlign").value = "2";
+      } else if (style === "cyberpunk") {
+        document.getElementById("telemCol").value = "#00F0FF";
+      } else if (style === "amber") {
+        document.getElementById("telemCol").value = "#FFB000";
+      }
+      schedulePreview();
+    }
+
     let inlineBgData = "";
     let editingPresetId = "";
     let dragTarget = "clock";
+    let currentLayer = "background";
     let previewTimer = null;
+    let previewSeq = 0;
+    let previewAbort = null;
+    const ONBOARD_KEY = "studio-onboarding:v1";
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[c]);
+    }
+
+    async function apiJson(url, options) {
+      const r = await fetch(url, options);
+      const text = await r.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; }
+      catch { throw new Error(r.ok ? "The server returned an unexpected response." : `Server error (${r.status}).`); }
+      if (!r.ok || data.ok === false) throw new Error(data.error || `Request failed (${r.status}).`);
+      return data;
+    }
+
+    function showOnboarding() { document.getElementById("onboardingCard").classList.add("visible"); }
+    function dismissOnboarding() {
+      document.getElementById("onboardingCard").classList.remove("visible");
+      try { localStorage.setItem(ONBOARD_KEY, "1"); } catch {}
+    }
+    function openOnboarding() { showOnboarding(); document.getElementById("onboardingCard").scrollIntoView({ behavior: "smooth", block: "start" }); }
 
     function toast(msg, isErr = false) {
       const el = document.getElementById("toast");
@@ -825,133 +1171,245 @@
     }
 
     function selectLayer(name) {
+      currentLayer = name;
       document.querySelectorAll(".layer-item").forEach(el => el.classList.toggle("selected", el.dataset.layer === name));
+      document.querySelectorAll(".insp-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.layer === name));
       document.querySelectorAll(".insp-pane").forEach(p => p.classList.toggle("active", p.id === "insp-" + name));
       if (name === "clock" || name === "weekday" || name === "battery") setDragTarget(name);
     }
 
+    async function customizePresetLayer(presetId, layerName) {
+      await editPreset(presetId);
+      selectLayer(layerName);
+    }
+
     window.addEventListener("resize", updateSegPill);
+
+    function nudgeLayer(dx, dy, ev) {
+      const prefix = { clock: "clk", weekday: "wk", battery: "batt" }[currentLayer];
+      if (!prefix) return;
+      const xEl = document.getElementById(prefix + "X");
+      const yEl = document.getElementById(prefix + "Y");
+      if (!xEl || !yEl) return;
+      const step = ev.shiftKey ? 1 : 5;
+      const x = Math.max(60, Math.min(406, parseInt(xEl.value, 10) + dx * step));
+      const y = Math.max(55, Math.min(415, parseInt(yEl.value, 10) + dy * step));
+      setPos(prefix, x, y);
+      ev.preventDefault();
+    }
+
     document.addEventListener("keydown", e => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
-        if (document.getElementById("view-designer").classList.contains("active")) {
-          e.preventDefault();
-          savePreset(false);
+      const active = document.activeElement;
+      const inField = active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName);
+      if (!inField && active && active.classList.contains("layer-item") && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault(); selectLayer(active.dataset.layer); return;
+      }
+      if (!inField && document.getElementById("view-designer").classList.contains("active")) {
+        const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+        if (arrows[e.key]) {
+          nudgeLayer(arrows[e.key][0], arrows[e.key][1], e);
+          return;
         }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" &&
+          document.getElementById("view-designer").classList.contains("active")) {
+        e.preventDefault();
+        savePreset(false);
       }
     });
 
     async function refreshAdb() {
       try {
-        const r = await fetch("/api/adb-status");
-        const d = await r.json();
+        const d = await apiJson("/api/adb-status");
         const pill = document.getElementById("adbPill");
-        document.getElementById("adbText").textContent = d.connected ? d.model : "No USB device";
+        const label = d.connected
+          ? (d.app_installed ? `${d.model} · Haylou Fun ready` : `${d.model} · app missing`)
+          : (d.detail || "No phone connected");
+        document.getElementById("adbText").textContent = label;
+        pill.title = d.connected ? `ADB ${d.serial} — ${d.app_installed ? "patched app installed" : "install the patched APK"}` : (d.detail || "USB debugging required");
         pill.classList.toggle("ok", !!d.connected);
       } catch {}
     }
 
     async function loadFonts(selectPath = null) {
-      const r = await fetch("/api/fonts");
-      const d = await r.json();
-      const opts = d.fonts.map(f => `<option value="${f.path.replace(/"/g, '&quot;')}">${f.label}</option>`).join("");
-      ["clkFont", "wkFont"].forEach(id => {
-        const sel = document.getElementById(id);
-        const cur = selectPath || sel.value;
-        sel.innerHTML = opts;
-        if (cur) sel.value = cur;
-      });
+      try {
+        const d = await apiJson("/api/fonts");
+        const opts = d.fonts.map(f => `<option value="${escapeHtml(f.path)}">${escapeHtml(f.label)}</option>`).join("");
+        ["clkFont", "wkFont"].forEach(id => {
+          const sel = document.getElementById(id);
+          const cur = selectPath || sel.value;
+          sel.innerHTML = opts || '<option value="">No fonts available — upload one</option>';
+          if (cur) sel.value = cur;
+        });
+      } catch (err) { toast(`Font list unavailable: ${err.message}`, true); }
     }
 
     async function uploadFont(file) {
       if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { toast("Font is larger than 8 MB.", true); return; }
       const reader = new FileReader();
       reader.onload = async e => {
-        const r = await fetch("/api/upload-font", {
-          method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ filename: file.name, font_data: e.target.result })
-        });
-        const d = await r.json();
-        toast(d.ok ? d.message : d.error, !d.ok);
-        if (d.ok) { await loadFonts(d.path); schedulePreview(); }
+        try {
+          const d = await apiJson("/api/upload-font", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ filename: file.name, font_data: e.target.result })
+          });
+          toast(d.message);
+          await loadFonts(d.path);
+          schedulePreview();
+        } catch (err) { toast(err.message, true); }
       };
       reader.readAsDataURL(file);
     }
 
     async function loadPresets() {
-      const r = await fetch("/api/presets");
-      const d = await r.json();
       const grid = document.getElementById("presetsGrid");
-      if (!d.presets.length) {
-        grid.innerHTML = `
-          <div class="empty-gallery">
-            <h3>No Watch Faces Yet</h3>
-            <p>Create a pure-image dial, custom digital clock, or Ben 10 Omnitrix in Studio.</p>
-            <button class="btn btn-primary" onclick="newWatchface()">Create Watch Face</button>
-          </div>`;
-        return;
+      try {
+        const d = await apiJson("/api/presets");
+        if (!d.presets.length) {
+          grid.innerHTML = `
+            <div class="empty-gallery">
+              <h3>Your watch faces will appear here</h3>
+              <p>Save a dial from the Studio to build a gallery you can push, copy and share.</p>
+              <button class="btn btn-primary" type="button" onclick="newWatchface()">Create your first dial</button>
+              <p style="margin-top:14px">Need the full workflow? <a href="#" onclick="openOnboarding(); return false;">Open the getting started guide</a></p>
+            </div>`;
+          return;
+        }
+        grid.innerHTML = d.presets.map(p => {
+          const id = escapeHtml(p.id);
+          const name = escapeHtml(p.name);
+          return `
+          <article class="face-tile">
+            <div class="tile-watch"><img src="${escapeHtml(p.preview_url)}" alt="${name}" loading="lazy" /></div>
+            <div class="tile-info">
+              <h3 class="truncate" title="${name}">${name}</h3>
+              <p class="line-clamp">${escapeHtml(p.subtitle || "")}</p>
+            </div>
+            <span class="tile-size tabular">${Number(p.size_kb).toFixed(1)} KB</span>
+            <div class="tile-actions">
+              <button class="btn btn-primary" type="button" onclick="pushPreset('${id}', this)">Push to Watch</button>
+              <button class="btn btn-sm" type="button" onclick="editPreset('${id}')">${p.editable ? "Edit" : "Open"}</button>
+              <button class="btn btn-sm" type="button" onclick="duplicatePreset('${id}')">Copy</button>
+              <button class="btn btn-sm" type="button" onclick="exportPreset('${id}')">Export</button>
+              <button class="btn btn-sm btn-danger" type="button" onclick="deletePreset('${id}')">Delete</button>
+            </div>
+            <div class="tile-quick-custom">
+              <button class="btn-chip" type="button" onclick="customizePresetLayer('${id}', 'clock')">Digital Clock</button>
+              <button class="btn-chip" type="button" onclick="customizePresetLayer('${id}', 'hands')">Hands</button>
+              <button class="btn-chip" type="button" onclick="customizePresetLayer('${id}', 'battery')">Battery</button>
+              <button class="btn-chip" type="button" onclick="customizePresetLayer('${id}', 'weekday')">Weekday</button>
+            </div>
+          </article>`;
+        }).join("");
+      } catch (err) {
+        grid.innerHTML = `<div class="empty-gallery"><h3>Could not load your watch faces</h3><p>${escapeHtml(err.message)}</p><button class="btn" type="button" onclick="loadPresets()">Try again</button></div>`;
       }
-      grid.innerHTML = d.presets.map(p => `
-        <article class="face-tile">
-          <div class="tile-watch"><img src="${p.preview_url}" alt="${p.name}" loading="lazy" /></div>
-          <div class="tile-info">
-            <h3>${p.name}</h3>
-            <p>${p.subtitle || ""}</p>
-          </div>
-          <span class="tile-size tabular">${p.size_kb} KB</span>
-          <div class="tile-actions">
-            <button class="btn btn-primary" onclick="pushPreset('${p.id}', this)">Push to Watch</button>
-            <button class="btn btn-sm" onclick="editPreset('${p.id}')">Edit</button>
-            <button class="btn btn-sm" onclick="duplicatePreset('${p.id}')">Copy</button>
-            <button class="btn btn-sm btn-danger" onclick="deletePreset('${p.id}')">Delete</button>
-          </div>
-        </article>
-      `).join("");
     }
 
     async function pushPreset(id, btn) {
-      const orig = btn.textContent; btn.disabled = true; btn.textContent = "Pushing...";
-      const r = await fetch("/api/push-preset", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id }) });
-      const d = await r.json();
-      toast(d.ok ? d.message : d.error, !d.ok);
-      btn.disabled = false; btn.textContent = orig;
+      const orig = btn.textContent; btn.disabled = true; btn.textContent = "Pushing…";
+      try {
+        const d = await apiJson("/api/push-preset", {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id })
+        });
+        toast(d.message);
+      } catch (err) { toast(err.message, true); }
+      finally { btn.disabled = false; btn.textContent = orig; }
     }
 
     async function duplicatePreset(id) {
-      const r = await fetch("/api/duplicate-preset", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id }) });
-      const d = await r.json();
-      toast(d.ok ? d.message : d.error, !d.ok);
+      try {
+        const d = await apiJson("/api/duplicate-preset", {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id })
+        });
+        toast(d.message);
+      } catch (err) { toast(err.message, true); }
       loadPresets();
     }
 
     async function deletePreset(id) {
-      if (!confirm("Delete this saved watch face?")) return;
-      await fetch("/api/delete-preset", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id }) });
-      toast("Watch face deleted."); loadPresets();
+      if (!confirm("Delete this saved watch face? This cannot be undone.")) return;
+      try {
+        await apiJson("/api/delete-preset", {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ id })
+        });
+        toast("Watch face deleted.");
+      } catch (err) { toast(err.message, true); }
+      loadPresets();
+    }
+
+    async function exportPreset(id) {
+      try {
+        const r = await fetch("/api/preset-bundle?id=" + encodeURIComponent(id));
+        if (!r.ok) {
+          const t = await r.text();
+          let msg = `Export failed (${r.status})`;
+          try { msg = JSON.parse(t).error || msg; } catch {}
+          throw new Error(msg);
+        }
+        const blob = await r.blob();
+        const disposition = r.headers.get("Content-Disposition") || "";
+        const match = disposition.match(/filename="([^"]+)"/);
+        downloadBlob(blob, match ? match[1] : `${id}.face.zip`);
+        toast("Shared dial package downloaded.");
+      } catch (err) { toast(err.message, true); }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     async function importBinFile(file) {
       if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { toast("That .bin is larger than 8 MB.", true); return; }
       const reader = new FileReader();
       reader.onload = async e => {
-        const name = file.name.replace(/\.bin$/i, "");
-        const r = await fetch("/api/import-bin", {
-          method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ name, bin_data: e.target.result })
-        });
-        const d = await r.json();
-        toast(d.ok ? d.message : d.error, !d.ok);
-        if (d.ok) loadPresets();
+        try {
+          const d = await apiJson("/api/import-bin", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ name: file.name.replace(/\.bin$/i, ""), bin_data: e.target.result })
+          });
+          toast(d.message);
+          loadPresets();
+        } catch (err) { toast(err.message, true); }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function importBundleFile(file) {
+      if (!file) return;
+      if (file.size > 32 * 1024 * 1024) { toast("That package is larger than 32 MB.", true); return; }
+      const reader = new FileReader();
+      reader.onload = async e => {
+        try {
+          const d = await apiJson("/api/import-bundle", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ bundle_data: e.target.result })
+          });
+          toast(d.message);
+          loadPresets();
+        } catch (err) { toast(err.message, true); }
       };
       reader.readAsDataURL(file);
     }
 
     async function installApk() {
+      if (!confirm("Install the patched Haylou Fun over the version currently on your phone? Your watch data stays on the device.")) return;
       const btn = document.getElementById("installApkBtn");
-      btn.disabled = true; btn.textContent = "Installing...";
-      const r = await fetch("/api/install-apk", { method: "POST", headers: {"Content-Type": "application/json"}, body: "{}" });
-      const d = await r.json();
-      toast(d.ok ? d.message : d.error, !d.ok);
-      btn.disabled = false; btn.textContent = "Install APK";
+      btn.disabled = true; btn.textContent = "Installing…";
+      try {
+        const d = await apiJson("/api/install-apk", {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"
+        });
+        toast(d.message);
+        refreshAdb();
+      } catch (err) { toast(err.message, true); }
+      finally { btn.disabled = false; btn.textContent = "Install APK"; }
     }
 
     function syncBgUI() {
@@ -959,6 +1417,31 @@
       document.getElementById("bgImageOpts").style.display = m === "image" ? "block" : "none";
       document.getElementById("bgSolidOpts").style.display = m === "solid" ? "flex" : "none";
       document.getElementById("bgOmniOpts").style.display = m === "omnitrix" ? "flex" : "none";
+      if (document.getElementById("bgPipboyOpts")) {
+        document.getElementById("bgPipboyOpts").style.display = m === "pipboy" ? "flex" : "none";
+      }
+    }
+
+    const OMNI_MODES = {
+      green:         { hex: "#39ff14", accent: "#ebffe6" },
+      timeout:       { hex: "#ff1818", accent: "#ffe6e6" },
+      self_destruct: { hex: "#ffa000", accent: "#fff5d2" },
+      ultimatrix:    { hex: "#00f0ff", accent: "#dcfaef" },
+      albedo:        { hex: "#d60036", accent: "#ffe1eb" },
+      carnitrix:     { hex: "#b40000", accent: "#ffc8c8" },
+      ben23:         { hex: "#00d2ff", accent: "#ffd700" },
+      gwen:          { hex: "#ff4fd8", accent: "#aae5ff" },
+      mad:           { hex: "#ff7b00", accent: "#fff0dc" },
+      nega:          { hex: "#c8d6e5", accent: "#f5faff" },
+    };
+
+    function onOmniModeSelect(mode) {
+      const m = OMNI_MODES[mode] || OMNI_MODES.green;
+      document.getElementById("omniHex").value = m.hex;
+      document.getElementById("handCol1").value = m.hex;
+      document.getElementById("handCol2").value = m.accent;
+      document.getElementById("battCol").value = m.hex;
+      schedulePreview();
     }
 
     function onOmniColorPick(hex) {
@@ -986,9 +1469,17 @@
           color: document.getElementById("bgCol1").value,
           color2: document.getElementById("bgCol2").value,
           omni_style: document.getElementById("omniStyle").value,
+          omni_colorway: document.getElementById("omniMode").value,
+          omni_alien: document.getElementById("omniAlien").value,
+          omni_alien_style: document.getElementById("omniAlienStyle").value,
           omni_hex: document.getElementById("omniHex").value,
           omni_glow: parseFloat(document.getElementById("omniGlow").value),
           omni_ticks: document.getElementById("omniTicks").checked,
+          weekday_str: document.getElementById("pipboyWeekday") ? document.getElementById("pipboyWeekday").value : "TUESDAY",
+          date_str: document.getElementById("pipboyDate") ? document.getElementById("pipboyDate").value : "11.26.2025",
+          weather_temp: document.getElementById("pipboyWeather") ? document.getElementById("pipboyWeather").value : "-10°F",
+          battery_pct: document.getElementById("pipboyBattery") ? document.getElementById("pipboyBattery").value : "100%",
+          seconds_mark: document.getElementById("pipboySeconds") ? document.getElementById("pipboySeconds").value : "35",
         },
         digital_clock: {
           enabled: document.getElementById("clkEnabled").checked,
@@ -1029,6 +1520,29 @@
           x: parseInt(document.getElementById("wkX").value),
           y: parseInt(document.getElementById("wkY").value),
           uppercase: document.getElementById("wkUpper").checked,
+        },
+        telemetry: {
+          enabled: document.getElementById("telemEnabled") ? document.getElementById("telemEnabled").checked : false,
+          color: document.getElementById("telemCol") ? document.getElementById("telemCol").value : "#89FC03",
+          font_size: document.getElementById("telemSize") ? parseInt(document.getElementById("telemSize").value) : 26,
+          steps: {
+            enabled: document.getElementById("telemStepsEnabled") ? document.getElementById("telemStepsEnabled").checked : true,
+            x: document.getElementById("telemStepsX") ? parseInt(document.getElementById("telemStepsX").value) : 180,
+            y: document.getElementById("telemStepsY") ? parseInt(document.getElementById("telemStepsY").value) : 272,
+            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+          },
+          calories: {
+            enabled: document.getElementById("telemCalEnabled") ? document.getElementById("telemCalEnabled").checked : true,
+            x: document.getElementById("telemCalX") ? parseInt(document.getElementById("telemCalX").value) : 180,
+            y: document.getElementById("telemCalY") ? parseInt(document.getElementById("telemCalY").value) : 142,
+            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+          },
+          heart_rate: {
+            enabled: document.getElementById("telemBpmEnabled") ? document.getElementById("telemBpmEnabled").checked : true,
+            x: document.getElementById("telemBpmX") ? parseInt(document.getElementById("telemBpmX").value) : 180,
+            y: document.getElementById("telemBpmY") ? parseInt(document.getElementById("telemBpmY").value) : 207,
+            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+          }
         }
       };
     }
@@ -1044,10 +1558,20 @@
       if (bg.color) document.getElementById("bgCol1").value = bg.color;
       if (bg.color2) document.getElementById("bgCol2").value = bg.color2;
       if (bg.omni_style) document.getElementById("omniStyle").value = bg.omni_style;
+      if (bg.omni_colorway) document.getElementById("omniMode").value = bg.omni_colorway;
+      if (bg.omni_alien) document.getElementById("omniAlien").value = bg.omni_alien;
+      if (bg.omni_alien_style) document.getElementById("omniAlienStyle").value = bg.omni_alien_style;
       if (bg.omni_hex) document.getElementById("omniHex").value = bg.omni_hex;
       document.getElementById("omniGlow").value = bg.omni_glow ?? 1.0;
       document.getElementById("omniGlowVal").textContent = bg.omni_glow ?? 1.0;
       document.getElementById("omniTicks").checked = bg.omni_ticks !== false;
+      if (document.getElementById("pipboyWeekday")) {
+        if (bg.weekday_str) document.getElementById("pipboyWeekday").value = bg.weekday_str;
+        if (bg.date_str) document.getElementById("pipboyDate").value = bg.date_str;
+        if (bg.weather_temp) document.getElementById("pipboyWeather").value = bg.weather_temp;
+        if (bg.battery_pct) document.getElementById("pipboyBattery").value = bg.battery_pct;
+        if (bg.seconds_mark) document.getElementById("pipboySeconds").value = bg.seconds_mark;
+      }
       syncBgUI();
 
       const c = cfg.digital_clock || {};
@@ -1091,6 +1615,34 @@
       if (w.color) document.getElementById("wkCol").value = w.color;
       setPos("wk", w.x ?? 233, w.y ?? 95);
       document.getElementById("wkUpper").checked = w.uppercase !== false;
+
+      const t = cfg.telemetry || {};
+      if (document.getElementById("telemEnabled")) {
+        const tEn = !!t.enabled;
+        document.getElementById("telemEnabled").checked = tEn;
+        if (document.getElementById("telemMasterEnabled")) document.getElementById("telemMasterEnabled").checked = tEn;
+        if (t.color) document.getElementById("telemCol").value = t.color;
+        if (t.font_size) {
+          document.getElementById("telemSize").value = t.font_size;
+          document.getElementById("telemSizeVal").textContent = t.font_size + "px";
+        }
+        if (t.steps) {
+          document.getElementById("telemStepsEnabled").checked = t.steps.enabled !== false;
+          if (t.steps.x !== undefined) document.getElementById("telemStepsX").value = t.steps.x;
+          if (t.steps.y !== undefined) document.getElementById("telemStepsY").value = t.steps.y;
+          if (t.steps.align !== undefined) document.getElementById("telemAlign").value = t.steps.align;
+        }
+        if (t.calories) {
+          document.getElementById("telemCalEnabled").checked = t.calories.enabled !== false;
+          if (t.calories.x !== undefined) document.getElementById("telemCalX").value = t.calories.x;
+          if (t.calories.y !== undefined) document.getElementById("telemCalY").value = t.calories.y;
+        }
+        if (t.heart_rate) {
+          document.getElementById("telemBpmEnabled").checked = t.heart_rate.enabled !== false;
+          if (t.heart_rate.x !== undefined) document.getElementById("telemBpmX").value = t.heart_rate.x;
+          if (t.heart_rate.y !== undefined) document.getElementById("telemBpmY").value = t.heart_rate.y;
+        }
+      }
     }
 
     function applyTemplate(t) {
@@ -1108,14 +1660,38 @@
           weekday: { enabled: true, x: 233, y: 74, font_size: 24, color: "#00f0ff", uppercase: true }
         });
       } else if (t.startsWith("omni_")) {
-        const map = { omni_af: ["alien_force", "Alien Force Omnitrix"], omni_os: ["os", "Original Series Omnitrix"], omni_ov: ["omniverse", "Omniverse Omnitrix"], omni_5yl: ["5yl", "5YL Omnitrix"] };
-        const [st, title] = map[t];
+        const map = {
+          omni_af:           ["alien_force", "Alien Force Omnitrix", "none", "green", "#39ff14", "#ebffe6"],
+          omni_os:           ["os", "Original Series Omnitrix", "none", "green", "#39ff14", "#ebffe6"],
+          omni_ov:           ["omniverse", "Omniverse Omnitrix", "none", "green", "#39ff14", "#ebffe6"],
+          omni_5yl:          ["5yl", "5YL Omnitrix", "none", "green", "#39ff14", "#ebffe6"],
+          omni_heatblast:    ["alien_select", "Omnitrix · Heatblast", "heatblast", "green", "#39ff14", "#ebffe6"],
+          omni_swampfire:    ["alien_select", "Omnitrix · Swampfire", "swampfire", "green", "#39ff14", "#ebffe6"],
+          omni_diamondhead:  ["alien_select", "Omnitrix · Diamondhead", "diamondhead", "green", "#39ff14", "#ebffe6"],
+          omni_xlr8:         ["alien_select", "Omnitrix · XLR8", "xlr8", "green", "#39ff14", "#ebffe6"],
+          omni_fourarms:     ["alien_select", "Omnitrix · Four Arms", "fourarms", "green", "#39ff14", "#ebffe6"],
+          omni_humungousaur: ["alien_select", "Omnitrix · Humungousaur", "humungousaur", "green", "#39ff14", "#ebffe6"],
+          omni_timeout:      ["alien_force", "Omnitrix · Timeout Red", "none", "timeout", "#ff1818", "#ffe6e6"],
+          omni_self_destruct:["alien_force", "Omnitrix · Self-Destruct", "none", "self_destruct", "#ffa000", "#fff5d2"],
+        };
+        const [st, title, alien, mode, hex, acc] = map[t] || ["alien_force", "Omnitrix", "none", "green", "#39ff14", "#ebffe6"];
         document.getElementById("presetName").value = title;
         loadConfigIntoUI({
-          background: { mode: "omnitrix", omni_style: st, omni_hex: "#39ff14", omni_glow: 1.0, omni_ticks: true, brightness: 85, vignette: 0 },
+          background: {
+            mode: "omnitrix",
+            omni_style: st,
+            omni_colorway: mode,
+            omni_alien: alien,
+            omni_alien_style: "shadow",
+            omni_hex: hex,
+            omni_glow: 1.0,
+            omni_ticks: true,
+            brightness: 85,
+            vignette: 0
+          },
           digital_clock: { enabled: false },
-          analog_hands: { enabled: true, style: "omnitrix", color: "#39ff14", accent_color: "#ebffe6", show_seconds: true, center_cap: false },
-          battery: { enabled: true, style: "ring", color: "#39ff14", thickness: 6 },
+          analog_hands: { enabled: true, style: "omnitrix", color: hex, accent_color: acc, show_seconds: true, center_cap: false },
+          battery: { enabled: true, style: "ring", color: hex, thickness: 6 },
           weekday: { enabled: false }
         });
       } else if (t === "luxury") {
@@ -1139,54 +1715,74 @@
 
     async function renderLivePreview() {
       const st = document.getElementById("renderStatus");
-      st.textContent = "Rendering 466×466...";
+      const seq = ++previewSeq;
+      if (previewAbort) previewAbort.abort();
+      previewAbort = new AbortController();
+      st.classList.remove("render-error");
+      st.textContent = "Rendering 466×466…";
       try {
         const r = await fetch("/api/render-preview", {
           method: "POST", headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ config: getConfig() })
+          body: JSON.stringify({ config: getConfig() }), signal: previewAbort.signal
         });
-        if (!r.ok) { st.textContent = "Preview error"; return; }
+        if (seq !== previewSeq) return; // a newer render already started
+        if (!r.ok) {
+          const t = await r.text();
+          let msg = `Preview error (${r.status})`;
+          try { msg = JSON.parse(t).error || msg; } catch {}
+          st.textContent = msg; st.classList.add("render-error");
+          return;
+        }
         const blob = await r.blob();
+        if (seq !== previewSeq) return;
         const url = URL.createObjectURL(blob);
         const img = document.getElementById("livePreview");
         if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
         img.src = url;
         img.dataset.url = url;
         st.textContent = "466×466 AMOLED · Live";
-      } catch { st.textContent = "Preview offline"; }
+      } catch (err) {
+        if (err.name === "AbortError" || seq !== previewSeq) return;
+        st.textContent = `Preview offline — ${err.message}`;
+        st.classList.add("render-error");
+      }
     }
 
     async function savePreset(push) {
       const b1 = document.getElementById("saveBtn"), b2 = document.getElementById("savePushBtn");
       b1.disabled = b2.disabled = true;
-      toast(push ? "Compiling .bin & pushing..." : "Compiling .bin...");
+      toast(push ? "Compiling .bin & pushing…" : "Compiling .bin…");
       try {
-        const r = await fetch("/api/save-preset", {
+        const d = await apiJson("/api/save-preset", {
           method: "POST", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
-            name: document.getElementById("presetName").value,
+            name: document.getElementById("presetName").value.slice(0, 80),
             edit_id: editingPresetId,
             config: getConfig(),
             push
           })
         });
-        const d = await r.json();
-        toast(d.ok ? d.message : d.error, !d.ok);
-        if (d.ok) { clearEditMode(); switchTab("presets"); }
-      } catch (e) { toast(String(e), true); }
-      b1.disabled = b2.disabled = false;
+        toast(d.message);
+        clearEditMode();
+        switchTab("presets");
+      } catch (err) { toast(err.message, true); }
+      finally { b1.disabled = b2.disabled = false; }
     }
 
     async function editPreset(id) {
-      const r = await fetch("/api/preset-config?id=" + encodeURIComponent(id));
-      const d = await r.json();
-      if (!d.ok) { toast(d.error, true); return; }
-      editingPresetId = d.id;
-      document.getElementById("presetName").value = d.name;
-      document.getElementById("editingBadge").style.display = "inline";
-      loadConfigIntoUI(d.config);
-      selectLayer("background");
-      switchTab("designer");
+      try {
+        await apiJson("/api/prepare-preset", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ id })
+        });
+        const d = await apiJson("/api/preset-config?id=" + encodeURIComponent(id));
+        editingPresetId = d.id;
+        document.getElementById("presetName").value = d.name;
+        document.getElementById("editingBadge").style.display = "inline";
+        loadConfigIntoUI(d.config);
+        selectLayer("background");
+        switchTab("designer");
+      } catch (err) { toast(err.message, true); }
     }
 
     function clearEditMode() {
@@ -1203,7 +1799,17 @@
     const overlay = document.getElementById("dragOverlay");
     const hud = document.getElementById("coordHud");
     let dragging = false;
+    let activePointerId = null;
+    const dragNotices = new Set();
+
+    function noticeOnce(key, message) {
+      if (dragNotices.has(key)) return;
+      dragNotices.add(key);
+      toast(message);
+    }
+
     function applyDragEvent(e) {
+      if (!dragging || e.pointerId !== activePointerId) return;
       const rect = overlay.getBoundingClientRect();
       let x = Math.round(((e.clientX - rect.left) / rect.width) * 466);
       let y = Math.round(((e.clientY - rect.top) / rect.height) * 466);
@@ -1221,27 +1827,48 @@
 
       const map = { clock: "clk", weekday: "wk", battery: "batt" };
       const pre = map[dragTarget];
-      if (dragTarget === "clock") document.getElementById("clkEnabled").checked = true;
-      if (dragTarget === "weekday") document.getElementById("wkEnabled").checked = true;
+      const layerName = { clock: "Digital Clock", weekday: "Weekday", battery: "Battery" }[dragTarget];
+      const enabledId = { clock: "clkEnabled", weekday: "wkEnabled", battery: "battEnabled" }[dragTarget];
+      const enabledEl = document.getElementById(enabledId);
+      if (enabledEl && !enabledEl.checked) {
+        enabledEl.checked = true;
+        noticeOnce("enable-" + dragTarget, `${layerName} was off — turned it on so you can see the placement.`);
+      }
       if (dragTarget === "battery") {
-        document.getElementById("battEnabled").checked = true;
-        if (document.getElementById("battStyle").value === "ring" || document.getElementById("battStyle").value === "arc") {
-          document.getElementById("battStyle").value = "bar";
+        const style = document.getElementById("battStyle").value;
+        if (style === "ring" || style === "arc") {
+          noticeOnce("batt-style", "Ring and arc battery styles ignore X/Y — choose Bar or Icon to position it.");
         }
       }
       setPos(pre, x, y);
     }
-    overlay.addEventListener("pointerdown", e => { dragging = true; overlay.setPointerCapture(e.pointerId); applyDragEvent(e); });
-    overlay.addEventListener("pointermove", e => { if (dragging) applyDragEvent(e); });
-    overlay.addEventListener("pointerup", () => {
+
+    function endDrag() {
+      if (!dragging) return;
       dragging = false;
+      activePointerId = null;
       hud.classList.remove("show");
       document.getElementById("snapV").style.display = "none";
       document.getElementById("snapH").style.display = "none";
+    }
+
+    overlay.addEventListener("pointerdown", e => {
+      if (dragging) return; // a second finger must not hijack the first drag
+      dragging = true;
+      activePointerId = e.pointerId;
+      overlay.setPointerCapture(e.pointerId);
+      applyDragEvent(e);
     });
+    overlay.addEventListener("pointermove", applyDragEvent);
+    overlay.addEventListener("pointerup", endDrag);
+    overlay.addEventListener("pointercancel", endDrag);
+    overlay.addEventListener("lostpointercapture", endDrag);
+    window.addEventListener("blur", endDrag);
 
     function handleBgFile(file) {
       if (!file) return;
+      if (!file.type.startsWith("image/")) { toast("Choose an image file (PNG, JPG or WEBP).", true); return; }
+      if (file.size > 16 * 1024 * 1024) { toast("Image is larger than 16 MB — use a smaller file.", true); return; }
       const reader = new FileReader();
       reader.onload = e => {
         inlineBgData = e.target.result;
@@ -1258,6 +1885,7 @@
     dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
     dz.addEventListener("drop", e => { e.preventDefault(); dz.classList.remove("drag"); handleBgFile(e.dataTransfer.files[0]); });
 
+    try { if (!localStorage.getItem(ONBOARD_KEY)) showOnboarding(); } catch { showOnboarding(); }
     refreshAdb();
     setInterval(refreshAdb, 5000);
     loadFonts().then(() => {

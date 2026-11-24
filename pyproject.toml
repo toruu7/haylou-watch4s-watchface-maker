@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haylou-watch4s-studio"
+version = "1.1.0"
+description = "Visual watchface designer and JieLi .bin compiler for the Haylou Watch 4S"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Haylou Watch 4S Studio contributors" }]
+keywords = ["haylou", "watch4s", "jieLi", "watchface", "smartwatch"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: Editors",
+]
+dependencies = ["Pillow>=10.2.0,<12"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.urls]
+Homepage = "https://github.com/toruu7/haylou-watch4s-watchface-maker"
+Issues = "https://github.com/toruu7/haylou-watch4s-watchface-maker/issues"
+
+[tool.setuptools]
+py-modules = []
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.md"]
