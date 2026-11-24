@@ -687,6 +687,13 @@
               </span>
               <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="wkEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
             </div>
+            <div class="layer-item" role="button" tabindex="0" data-layer="date" onclick="selectLayer('date')">
+              <span class="layer-item-left">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                Date (MM/DD)
+              </span>
+              <label class="switch" onclick="event.stopPropagation()"><input type="checkbox" id="dateEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
             <div class="layer-item" role="button" tabindex="0" data-layer="telemetry" onclick="selectLayer('telemetry')">
               <span class="layer-item-left">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -700,6 +707,7 @@
         <div>
           <div class="rail-group-title">Templates</div>
           <div class="tpl-list">
+            <button class="tpl-btn" onclick="applyTemplate('fitness_hud')">Fitness HUD · All Live <span class="tpl-swatch" style="background:#38bdf8"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('pure')">Pure Photo <span class="tpl-swatch" style="background:#3a3a3c"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('stacked_neon')">Stacked Neon <span class="tpl-swatch" style="background:#00f0ff"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('omni_af')">Omnitrix · Alien Force <span class="tpl-swatch" style="background:#39ff14"></span></button>
@@ -736,8 +744,9 @@
         <div class="floating-dock">
           <div class="drag-seg" title="Layer to drag on watch">
             <button class="drag-chip active" data-drag="clock" onclick="setDragTarget('clock')">Clock</button>
+            <button class="drag-chip" data-drag="date" onclick="setDragTarget('date')">Date</button>
             <button class="drag-chip" data-drag="weekday" onclick="setDragTarget('weekday')">Weekday</button>
-            <button class="drag-chip" data-drag="battery" onclick="setDragTarget('battery')">Battery</button>
+            <button class="drag-chip" data-drag="battery" onclick="setDragTarget('battery')">Gauge</button>
           </div>
           <div class="dock-divider"></div>
           <input class="dock-input" type="text" id="presetName" placeholder="Watch face name" value="Alien Force Omnitrix" />
@@ -756,19 +765,25 @@
         <!-- TOP LAYER SELECTOR TABS -->
         <div class="insp-tab-bar">
           <button type="button" class="insp-tab-btn active" data-layer="background" onclick="selectLayer('background')">
-            🖼 Background
+            Background
           </button>
           <button type="button" class="insp-tab-btn" data-layer="clock" onclick="selectLayer('clock')">
-            ⏰ Digital Clock
+            Clock
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="date" onclick="selectLayer('date')">
+            Date
           </button>
           <button type="button" class="insp-tab-btn" data-layer="hands" onclick="selectLayer('hands')">
-            ⏱ Hands
+            Hands
           </button>
           <button type="button" class="insp-tab-btn" data-layer="battery" onclick="selectLayer('battery')">
-            🔋 Battery
+            Gauge
           </button>
           <button type="button" class="insp-tab-btn" data-layer="weekday" onclick="selectLayer('weekday')">
-            📅 Weekday
+            Weekday
+          </button>
+          <button type="button" class="insp-tab-btn" data-layer="telemetry" onclick="selectLayer('telemetry')">
+            Telemetry
           </button>
         </div>
         <!-- INSPECTOR: BACKGROUND -->
@@ -779,16 +794,32 @@
               <label>Source</label>
               <select id="bgMode" onchange="syncBgUI(); schedulePreview();">
                 <option value="omnitrix">Ben 10 Omnitrix</option>
-                <option value="pipboy">Fallout Pip-Boy 3000 CRT</option>
                 <option value="image">Custom Photo</option>
+                <option value="animated_gif">Animated GIF / WebP (01 2e)</option>
                 <option value="solid">Solid / Gradient</option>
               </select>
             </div>
             <div id="bgImageOpts" style="display:none;">
               <div class="dropzone" id="dropzone" onclick="document.getElementById('bgFileInput').click()">
-                Drop PNG, JPG, or WEBP here — or click to browse
+                Drop PNG, JPG, WEBP, or animated GIF here — or click to browse
                 <input type="file" id="bgFileInput" accept="image/*" style="display:none" />
               </div>
+            </div>
+            <div id="bgAnimOpts" style="display:none; flex-direction:column; gap:10px; padding:10px; background:rgba(0,0,0,0.25); border-radius:8px; border:1px solid var(--hairline);">
+              <div style="font-size:12px; font-weight:600; color:#38bdf8;">Hardware Animation (Opcode 01 2e)</div>
+              <div class="prop-row">
+                <label>Frames <span class="tabular" id="animFramesVal">8</span></label>
+                <input type="range" id="animFrames" min="2" max="16" value="8" oninput="document.getElementById('animFramesVal').textContent=this.value; schedulePreview()" />
+              </div>
+              <div class="prop-row">
+                <label>Speed <span class="tabular" id="animFpsVal">4 fps</span></label>
+                <input type="range" id="animFps" min="1" max="12" value="4" oninput="document.getElementById('animFpsVal').textContent=this.value+' fps'; schedulePreview()" />
+              </div>
+              <div class="prop-row">
+                <label>Diameter <span class="tabular" id="animSizeVal">466px (Full)</span></label>
+                <input type="range" id="animSize" min="160" max="466" step="6" value="466" oninput="document.getElementById('animSizeVal').textContent=(this.value>=466?'466px (Full)':this.value+'px'); syncBgUI(); schedulePreview()" />
+              </div>
+              <div style="font-size:11px; color:var(--label-tertiary);">Auto-optimizes frames to stay under the Watch 4S 1.3 MB flash limit.</div>
             </div>
             <div id="bgSolidOpts" style="display:none;" class="prop-inline">
               <div class="prop-row"><label>Top</label><input type="color" id="bgCol1" value="#0a0f1c" oninput="schedulePreview()" /></div>
@@ -914,6 +945,18 @@
               <label>Spacing <span class="tabular" id="clkGapVal">6px</span></label>
               <input type="range" id="clkGap" min="0" max="24" value="6" oninput="document.getElementById('clkGapVal').textContent=this.value+'px'; schedulePreview()" />
             </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Blinking Colon (Horizontal)</span>
+              <label class="switch"><input type="checkbox" id="clkColon" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Live Seconds (01 18)</span>
+              <label class="switch"><input type="checkbox" id="clkSecEnabled" onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Sec Color</label><input type="color" id="clkSecCol" value="#ff453a" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Sec Size <span class="tabular" id="clkSecSizeVal">32px</span></label><input type="range" id="clkSecSize" min="16" max="64" value="32" oninput="document.getElementById('clkSecSizeVal').textContent=this.value+'px'; schedulePreview()" /></div>
+            </div>
           </div>
 
           <div class="insp-section">
@@ -970,10 +1013,19 @@
           </div>
         </div>
 
-        <!-- INSPECTOR: BATTERY -->
+        <!-- INSPECTOR: BATTERY / PROGRESS GAUGE -->
         <div class="insp-pane" id="insp-battery">
-          <div class="insp-header"><h3>Battery</h3></div>
+          <div class="insp-header"><h3>Progress Gauge (01 12)</h3></div>
           <div class="insp-section">
+            <div class="prop-row">
+              <label>Metric</label>
+              <select id="battMetric" onchange="schedulePreview()">
+                <option value="battery">Battery Level (sub 0x06)</option>
+                <option value="steps">Steps Goal (sub 0x00)</option>
+                <option value="calories">Calories Goal (sub 0x02)</option>
+                <option value="distance">Distance Goal (sub 0x03)</option>
+              </select>
+            </div>
             <div class="prop-row">
               <label>Style</label>
               <select id="battStyle" onchange="schedulePreview()">
@@ -981,7 +1033,6 @@
                 <option value="arc">Bottom Arc Gauge</option>
                 <option value="bar">Horizontal Bar</option>
                 <option value="icon">Battery Icon</option>
-                <option value="dynamic_2way">2-Way Dynamic Faceplate (>=50% / <50%)</option>
               </select>
             </div>
             <div class="prop-inline">
@@ -1011,78 +1062,131 @@
           </div>
         </div>
 
+        <!-- INSPECTOR: DATE (MM/DD) -->
+        <div class="insp-pane" id="insp-date">
+          <div class="insp-header"><h3>Live Date (01 0f / 01 0d)</h3></div>
+          <div class="insp-section">
+            <div class="prop-row">
+              <label>Format</label>
+              <select id="dateFmt" onchange="schedulePreview()">
+                <option value="MM/DD">MM/DD (11/24)</option>
+                <option value="DD/MM">DD/MM (24/11)</option>
+                <option value="MM-DD">MM-DD (11-24)</option>
+                <option value="DD-MM">DD-MM (24-11)</option>
+                <option value="DD">Day Only (24)</option>
+              </select>
+            </div>
+            <div class="prop-row"><label>Typeface</label><select id="dateFont" onchange="schedulePreview()"></select></div>
+            <div class="prop-inline">
+              <div class="prop-row"><label>Color</label><input type="color" id="dateCol" value="#e2e8f0" oninput="schedulePreview()" /></div>
+              <div class="prop-row"><label>Size <span class="tabular" id="dateSizeVal">24px</span></label><input type="range" id="dateSize" min="14" max="48" value="24" oninput="document.getElementById('dateSizeVal').textContent=this.value+'px'; schedulePreview()" /></div>
+            </div>
+            <div class="prop-row"><label>X <span class="tabular" id="dateXVal">233</span></label><input type="range" id="dateX" min="60" max="406" value="233" oninput="document.getElementById('dateXVal').textContent=this.value; schedulePreview()" /></div>
+            <div class="prop-row"><label>Y <span class="tabular" id="dateYVal">132</span></label><input type="range" id="dateY" min="50" max="420" value="132" oninput="document.getElementById('dateYVal').textContent=this.value; schedulePreview()" /></div>
+          </div>
+        </div>
+
         <!-- INSPECTOR: TELEMETRY -->
         <div class="insp-pane" id="insp-telemetry">
           <div class="insp-header">
             <h3>Health Telemetry</h3>
-            <span class="badge" style="background: rgba(137, 252, 3, 0.15); color: #89FC03; border: 1px solid rgba(137, 252, 3, 0.3); font-size: 11px; padding: 2px 6px; border-radius: 4px;">Sensor fields</span>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 11px; padding: 2px 6px; border-radius: 4px;">LS26 Native</span>
           </div>
           <div class="insp-section">
             <div class="prop-row checkbox-row">
               <label><input type="checkbox" id="telemMasterEnabled" onchange="document.getElementById('telemEnabled').checked = this.checked; schedulePreview();" /> <b>Enable Live Telemetry</b></label>
             </div>
             <div class="prop-row">
-              <label>Preset Style</label>
-              <div style="display: flex; gap: 6px; margin-top: 4px;">
-                <button type="button" class="btn-chip" onclick="applyTelemPreset('pipboy')" style="color: #89FC03;">Pip-Boy Green</button>
+              <label>Preset Layout</label>
+              <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;">
+                <button type="button" class="btn-chip" onclick="applyTelemPreset('hud')" style="color: #38bdf8;">Fitness HUD</button>
                 <button type="button" class="btn-chip" onclick="applyTelemPreset('cyberpunk')" style="color: #00F0FF;">Cyberpunk Cyan</button>
                 <button type="button" class="btn-chip" onclick="applyTelemPreset('amber')" style="color: #FFB000;">Amber</button>
               </div>
             </div>
+            <div class="prop-row"><label>Typeface</label><select id="telemFont" onchange="schedulePreview()"></select></div>
             <div class="prop-inline">
               <div class="prop-row">
                 <label>Color</label>
-                <input type="color" id="telemCol" value="#89FC03" oninput="schedulePreview()" />
+                <input type="color" id="telemCol" value="#e2e8f0" oninput="schedulePreview()" />
               </div>
               <div class="prop-row">
-                <label>Size <span class="tabular" id="telemSizeVal">26px</span></label>
-                <input type="range" id="telemSize" min="16" max="36" value="26" oninput="document.getElementById('telemSizeVal').textContent = this.value + 'px'; schedulePreview();" />
+                <label>Size <span class="tabular" id="telemSizeVal">22px</span></label>
+                <input type="range" id="telemSize" min="14" max="36" value="22" oninput="document.getElementById('telemSizeVal').textContent = this.value + 'px'; schedulePreview();" />
               </div>
             </div>
             <div class="prop-row">
               <label>Alignment</label>
               <select id="telemAlign" onchange="schedulePreview()">
-                <option value="2" selected>Right-Aligned (Anchored at X)</option>
-                <option value="0">Left-Aligned</option>
-                <option value="1">Centered</option>
+                <option value="2" selected>Centered (Anchored at X)</option>
+                <option value="0">Left-Aligned (Starts at X)</option>
+                <option value="1">Right-Aligned (Ends at X)</option>
               </select>
             </div>
-            <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--hairline);">
-              <div style="font-size: 12px; font-weight: 600; color: var(--label); margin-bottom: 8px;">Telemetry Widgets</div>
-              
-              <!-- Calories -->
-              <div style="margin-bottom: 8px;">
-                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
-                  <span>🔥 Calories (0x0108)</span>
-                  <input type="checkbox" id="telemCalEnabled" checked onchange="schedulePreview()" />
-                </label>
-                <div class="prop-inline" style="margin-top: 4px;">
-                  <div class="prop-row"><label>X</label><input type="number" id="telemCalX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
-                  <div class="prop-row"><label>Y</label><input type="number" id="telemCalY" value="142" min="0" max="466" onchange="schedulePreview()" /></div>
-                </div>
-              </div>
-
-              <!-- Heart Rate -->
-              <div style="margin-bottom: 8px;">
-                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
-                  <span>❤️ Heart Rate / BPM (0x0106)</span>
-                  <input type="checkbox" id="telemBpmEnabled" checked onchange="schedulePreview()" />
-                </label>
-                <div class="prop-inline" style="margin-top: 4px;">
-                  <div class="prop-row"><label>X</label><input type="number" id="telemBpmX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
-                  <div class="prop-row"><label>Y</label><input type="number" id="telemBpmY" value="207" min="0" max="466" onchange="schedulePreview()" /></div>
-                </div>
-              </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:12px; color:var(--label-secondary);">Mini Metric Icons</span>
+              <label class="switch"><input type="checkbox" id="telemIcons" checked onchange="schedulePreview()" /><span class="switch-track"></span></label>
+            </div>
+            <div style="margin-top: 6px; padding: 10px; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid var(--hairline); display:flex; flex-direction:column; gap:10px;">
+              <div style="font-size: 12px; font-weight: 600; color: var(--label);">Hardware Sensor Widgets</div>
 
               <!-- Steps -->
               <div>
                 <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
-                  <span>👟 Steps (0x0107)</span>
+                  <span>Steps (01 07)</span>
                   <input type="checkbox" id="telemStepsEnabled" checked onchange="schedulePreview()" />
                 </label>
                 <div class="prop-inline" style="margin-top: 4px;">
-                  <div class="prop-row"><label>X</label><input type="number" id="telemStepsX" value="180" min="0" max="466" onchange="schedulePreview()" /></div>
-                  <div class="prop-row"><label>Y</label><input type="number" id="telemStepsY" value="272" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>X</label><input type="number" id="telemStepsX" value="233" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemStepsY" value="350" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Heart Rate -->
+              <div>
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>Heart Rate BPM (01 06)</span>
+                  <input type="checkbox" id="telemBpmEnabled" checked onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemBpmX" value="138" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemBpmY" value="295" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Calories -->
+              <div>
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>Calories Kcal (01 09)</span>
+                  <input type="checkbox" id="telemCalEnabled" checked onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemCalX" value="328" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemCalY" value="295" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Distance -->
+              <div>
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>Distance km/mi (01 08)</span>
+                  <input type="checkbox" id="telemDistEnabled" onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemDistX" value="233" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemDistY" value="398" min="0" max="466" onchange="schedulePreview()" /></div>
+                </div>
+              </div>
+
+              <!-- Battery % Number -->
+              <div>
+                <label style="display: flex; align-items: center; justify-content: space-between; font-size: 12px;">
+                  <span>Battery % Number (01 15)</span>
+                  <input type="checkbox" id="telemBattPctEnabled" onchange="schedulePreview()" />
+                </label>
+                <div class="prop-inline" style="margin-top: 4px;">
+                  <div class="prop-row"><label>X</label><input type="number" id="telemBattPctX" value="233" min="0" max="466" onchange="schedulePreview()" /></div>
+                  <div class="prop-row"><label>Y</label><input type="number" id="telemBattPctY" value="58" min="0" max="466" onchange="schedulePreview()" /></div>
                 </div>
               </div>
             </div>
@@ -1097,15 +1201,18 @@
   <script>
     
     function applyTelemPreset(style) {
-      if (style === "pipboy") {
-        document.getElementById("telemCol").value = "#89FC03";
-        document.getElementById("telemCalX").value = 180;
-        document.getElementById("telemCalY").value = 142;
-        document.getElementById("telemBpmX").value = 180;
-        document.getElementById("telemBpmY").value = 207;
-        document.getElementById("telemStepsX").value = 180;
-        document.getElementById("telemStepsY").value = 272;
+      document.getElementById("telemEnabled").checked = true;
+      document.getElementById("telemMasterEnabled").checked = true;
+      if (style === "hud") {
+        document.getElementById("telemCol").value = "#e2e8f0";
         document.getElementById("telemAlign").value = "2";
+        document.getElementById("telemBpmX").value = 138;
+        document.getElementById("telemBpmY").value = 295;
+        document.getElementById("telemCalX").value = 328;
+        document.getElementById("telemCalY").value = 295;
+        document.getElementById("telemStepsX").value = 233;
+        document.getElementById("telemStepsY").value = 358;
+        document.getElementById("telemIcons").checked = true;
       } else if (style === "cyberpunk") {
         document.getElementById("telemCol").value = "#00F0FF";
       } else if (style === "amber") {
@@ -1175,7 +1282,7 @@
       document.querySelectorAll(".layer-item").forEach(el => el.classList.toggle("selected", el.dataset.layer === name));
       document.querySelectorAll(".insp-tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.layer === name));
       document.querySelectorAll(".insp-pane").forEach(p => p.classList.toggle("active", p.id === "insp-" + name));
-      if (name === "clock" || name === "weekday" || name === "battery") setDragTarget(name);
+      if (name === "clock" || name === "date" || name === "weekday" || name === "battery") setDragTarget(name);
     }
 
     async function customizePresetLayer(presetId, layerName) {
@@ -1186,7 +1293,7 @@
     window.addEventListener("resize", updateSegPill);
 
     function nudgeLayer(dx, dy, ev) {
-      const prefix = { clock: "clk", weekday: "wk", battery: "batt" }[currentLayer];
+      const prefix = { clock: "clk", date: "date", weekday: "wk", battery: "batt" }[currentLayer];
       if (!prefix) return;
       const xEl = document.getElementById(prefix + "X");
       const yEl = document.getElementById(prefix + "Y");
@@ -1235,8 +1342,9 @@
       try {
         const d = await apiJson("/api/fonts");
         const opts = d.fonts.map(f => `<option value="${escapeHtml(f.path)}">${escapeHtml(f.label)}</option>`).join("");
-        ["clkFont", "wkFont"].forEach(id => {
+        ["clkFont", "wkFont", "dateFont", "telemFont"].forEach(id => {
           const sel = document.getElementById(id);
+          if (!sel) return;
           const cur = selectPath || sel.value;
           sel.innerHTML = opts || '<option value="">No fonts available — upload one</option>';
           if (cur) sel.value = cur;
@@ -1414,8 +1522,11 @@
 
     function syncBgUI() {
       const m = document.getElementById("bgMode").value;
-      document.getElementById("bgImageOpts").style.display = m === "image" ? "block" : "none";
-      document.getElementById("bgSolidOpts").style.display = m === "solid" ? "flex" : "none";
+      const isAnim = m === "animated_gif";
+      const animSz = parseInt(document.getElementById("animSize")?.value || "466", 10);
+      document.getElementById("bgImageOpts").style.display = (m === "image" || isAnim) ? "block" : "none";
+      document.getElementById("bgAnimOpts").style.display = isAnim ? "flex" : "none";
+      document.getElementById("bgSolidOpts").style.display = (m === "solid" || (isAnim && animSz < 466)) ? "flex" : "none";
       document.getElementById("bgOmniOpts").style.display = m === "omnitrix" ? "flex" : "none";
       if (document.getElementById("bgPipboyOpts")) {
         document.getElementById("bgPipboyOpts").style.display = m === "pipboy" ? "flex" : "none";
@@ -1460,10 +1571,14 @@
     }
 
     function getConfig() {
+      const telemAlignVal = document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2;
       return {
         background: {
           mode: document.getElementById("bgMode").value,
           image_data: inlineBgData || undefined,
+          anim_frames: parseInt(document.getElementById("animFrames")?.value || "8"),
+          anim_fps: parseInt(document.getElementById("animFps")?.value || "4"),
+          anim_size: parseInt(document.getElementById("animSize")?.value || "466"),
           brightness: parseInt(document.getElementById("bgBright").value),
           vignette: parseInt(document.getElementById("bgVig").value),
           color: document.getElementById("bgCol1").value,
@@ -1484,6 +1599,10 @@
         digital_clock: {
           enabled: document.getElementById("clkEnabled").checked,
           layout: document.getElementById("clkLayout").value,
+          show_colon: document.getElementById("clkColon") ? document.getElementById("clkColon").checked : true,
+          show_seconds: document.getElementById("clkSecEnabled") ? document.getElementById("clkSecEnabled").checked : false,
+          seconds_color: document.getElementById("clkSecCol") ? document.getElementById("clkSecCol").value : "#ff453a",
+          seconds_size: document.getElementById("clkSecSize") ? parseInt(document.getElementById("clkSecSize").value) : 32,
           x: parseInt(document.getElementById("clkX").value),
           y: parseInt(document.getElementById("clkY").value),
           spacing: parseInt(document.getElementById("clkGap").value),
@@ -1506,6 +1625,7 @@
         },
         battery: {
           enabled: document.getElementById("battEnabled").checked,
+          metric: document.getElementById("battMetric") ? document.getElementById("battMetric").value : "battery",
           style: document.getElementById("battStyle").value,
           color: document.getElementById("battCol").value,
           thickness: parseInt(document.getElementById("battThick").value),
@@ -1521,27 +1641,51 @@
           y: parseInt(document.getElementById("wkY").value),
           uppercase: document.getElementById("wkUpper").checked,
         },
+        date: {
+          enabled: document.getElementById("dateEnabled") ? document.getElementById("dateEnabled").checked : false,
+          format: document.getElementById("dateFmt") ? document.getElementById("dateFmt").value : "MM/DD",
+          font_path: document.getElementById("dateFont") ? document.getElementById("dateFont").value : "",
+          font_size: document.getElementById("dateSize") ? parseInt(document.getElementById("dateSize").value) : 24,
+          color: document.getElementById("dateCol") ? document.getElementById("dateCol").value : "#e2e8f0",
+          x: document.getElementById("dateX") ? parseInt(document.getElementById("dateX").value) : 233,
+          y: document.getElementById("dateY") ? parseInt(document.getElementById("dateY").value) : 132,
+        },
         telemetry: {
           enabled: document.getElementById("telemEnabled") ? document.getElementById("telemEnabled").checked : false,
-          color: document.getElementById("telemCol") ? document.getElementById("telemCol").value : "#89FC03",
-          font_size: document.getElementById("telemSize") ? parseInt(document.getElementById("telemSize").value) : 26,
+          font_path: document.getElementById("telemFont") ? document.getElementById("telemFont").value : "",
+          color: document.getElementById("telemCol") ? document.getElementById("telemCol").value : "#e2e8f0",
+          font_size: document.getElementById("telemSize") ? parseInt(document.getElementById("telemSize").value) : 22,
+          align: telemAlignVal,
+          show_icons: document.getElementById("telemIcons") ? document.getElementById("telemIcons").checked : true,
           steps: {
             enabled: document.getElementById("telemStepsEnabled") ? document.getElementById("telemStepsEnabled").checked : true,
-            x: document.getElementById("telemStepsX") ? parseInt(document.getElementById("telemStepsX").value) : 180,
-            y: document.getElementById("telemStepsY") ? parseInt(document.getElementById("telemStepsY").value) : 272,
-            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+            x: document.getElementById("telemStepsX") ? parseInt(document.getElementById("telemStepsX").value) : 233,
+            y: document.getElementById("telemStepsY") ? parseInt(document.getElementById("telemStepsY").value) : 350,
+            align: telemAlignVal
           },
           calories: {
             enabled: document.getElementById("telemCalEnabled") ? document.getElementById("telemCalEnabled").checked : true,
-            x: document.getElementById("telemCalX") ? parseInt(document.getElementById("telemCalX").value) : 180,
-            y: document.getElementById("telemCalY") ? parseInt(document.getElementById("telemCalY").value) : 142,
-            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+            x: document.getElementById("telemCalX") ? parseInt(document.getElementById("telemCalX").value) : 328,
+            y: document.getElementById("telemCalY") ? parseInt(document.getElementById("telemCalY").value) : 295,
+            align: telemAlignVal
           },
           heart_rate: {
             enabled: document.getElementById("telemBpmEnabled") ? document.getElementById("telemBpmEnabled").checked : true,
-            x: document.getElementById("telemBpmX") ? parseInt(document.getElementById("telemBpmX").value) : 180,
-            y: document.getElementById("telemBpmY") ? parseInt(document.getElementById("telemBpmY").value) : 207,
-            align: document.getElementById("telemAlign") ? parseInt(document.getElementById("telemAlign").value) : 2
+            x: document.getElementById("telemBpmX") ? parseInt(document.getElementById("telemBpmX").value) : 138,
+            y: document.getElementById("telemBpmY") ? parseInt(document.getElementById("telemBpmY").value) : 295,
+            align: telemAlignVal
+          },
+          distance: {
+            enabled: document.getElementById("telemDistEnabled") ? document.getElementById("telemDistEnabled").checked : false,
+            x: document.getElementById("telemDistX") ? parseInt(document.getElementById("telemDistX").value) : 233,
+            y: document.getElementById("telemDistY") ? parseInt(document.getElementById("telemDistY").value) : 398,
+            align: telemAlignVal
+          },
+          battery_pct: {
+            enabled: document.getElementById("telemBattPctEnabled") ? document.getElementById("telemBattPctEnabled").checked : false,
+            x: document.getElementById("telemBattPctX") ? parseInt(document.getElementById("telemBattPctX").value) : 233,
+            y: document.getElementById("telemBattPctY") ? parseInt(document.getElementById("telemBattPctY").value) : 58,
+            align: telemAlignVal
           }
         }
       };
@@ -1551,6 +1695,17 @@
       const bg = cfg.background || {};
       document.getElementById("bgMode").value = bg.mode || "solid";
       inlineBgData = bg.image_data || "";
+      if (document.getElementById("animFrames")) {
+        const af = bg.anim_frames ?? 8;
+        document.getElementById("animFrames").value = af;
+        document.getElementById("animFramesVal").textContent = af;
+        const fps = bg.anim_fps ?? 4;
+        document.getElementById("animFps").value = fps;
+        document.getElementById("animFpsVal").textContent = fps + " fps";
+        const asz = bg.anim_size ?? 466;
+        document.getElementById("animSize").value = asz;
+        document.getElementById("animSizeVal").textContent = asz >= 466 ? "466px (Full)" : asz + "px";
+      }
       document.getElementById("bgBright").value = bg.brightness ?? 100;
       document.getElementById("bgBrightVal").textContent = (bg.brightness ?? 100) + "%";
       document.getElementById("bgVig").value = bg.vignette ?? 0;
@@ -1577,6 +1732,14 @@
       const c = cfg.digital_clock || {};
       document.getElementById("clkEnabled").checked = !!c.enabled;
       document.getElementById("clkLayout").value = c.layout || "horizontal";
+      if (document.getElementById("clkColon")) document.getElementById("clkColon").checked = c.show_colon !== false;
+      if (document.getElementById("clkSecEnabled")) document.getElementById("clkSecEnabled").checked = !!c.show_seconds;
+      if (c.seconds_color && document.getElementById("clkSecCol")) document.getElementById("clkSecCol").value = c.seconds_color;
+      if (document.getElementById("clkSecSize")) {
+        const ss = c.seconds_size ?? 32;
+        document.getElementById("clkSecSize").value = ss;
+        document.getElementById("clkSecSizeVal").textContent = ss + "px";
+      }
       setPos("clk", c.x ?? 233, c.y ?? 233);
       document.getElementById("clkSize").value = c.font_size ?? 64;
       document.getElementById("clkSizeVal").textContent = (c.font_size ?? 64) + "px";
@@ -1601,6 +1764,7 @@
 
       const b = cfg.battery || {};
       document.getElementById("battEnabled").checked = !!b.enabled;
+      if (document.getElementById("battMetric")) document.getElementById("battMetric").value = b.metric || "battery";
       document.getElementById("battStyle").value = b.style || "ring";
       if (b.color) document.getElementById("battCol").value = b.color;
       document.getElementById("battThick").value = b.thickness ?? 6;
@@ -1616,21 +1780,35 @@
       setPos("wk", w.x ?? 233, w.y ?? 95);
       document.getElementById("wkUpper").checked = w.uppercase !== false;
 
+      const dt = cfg.date || {};
+      if (document.getElementById("dateEnabled")) {
+        document.getElementById("dateEnabled").checked = !!dt.enabled;
+        if (dt.format) document.getElementById("dateFmt").value = dt.format;
+        if (dt.font_path) document.getElementById("dateFont").value = dt.font_path;
+        document.getElementById("dateSize").value = dt.font_size ?? 24;
+        document.getElementById("dateSizeVal").textContent = (dt.font_size ?? 24) + "px";
+        if (dt.color) document.getElementById("dateCol").value = dt.color;
+        setPos("date", dt.x ?? 233, dt.y ?? 132);
+      }
+
       const t = cfg.telemetry || {};
       if (document.getElementById("telemEnabled")) {
         const tEn = !!t.enabled;
         document.getElementById("telemEnabled").checked = tEn;
         if (document.getElementById("telemMasterEnabled")) document.getElementById("telemMasterEnabled").checked = tEn;
+        if (t.font_path && document.getElementById("telemFont")) document.getElementById("telemFont").value = t.font_path;
         if (t.color) document.getElementById("telemCol").value = t.color;
         if (t.font_size) {
           document.getElementById("telemSize").value = t.font_size;
           document.getElementById("telemSizeVal").textContent = t.font_size + "px";
         }
+        if (t.align !== undefined) document.getElementById("telemAlign").value = String(t.align);
+        if (document.getElementById("telemIcons")) document.getElementById("telemIcons").checked = t.show_icons !== false;
         if (t.steps) {
           document.getElementById("telemStepsEnabled").checked = t.steps.enabled !== false;
           if (t.steps.x !== undefined) document.getElementById("telemStepsX").value = t.steps.x;
           if (t.steps.y !== undefined) document.getElementById("telemStepsY").value = t.steps.y;
-          if (t.steps.align !== undefined) document.getElementById("telemAlign").value = t.steps.align;
+          if (t.steps.align !== undefined) document.getElementById("telemAlign").value = String(t.steps.align);
         }
         if (t.calories) {
           document.getElementById("telemCalEnabled").checked = t.calories.enabled !== false;
@@ -1642,12 +1820,40 @@
           if (t.heart_rate.x !== undefined) document.getElementById("telemBpmX").value = t.heart_rate.x;
           if (t.heart_rate.y !== undefined) document.getElementById("telemBpmY").value = t.heart_rate.y;
         }
+        if (t.distance && document.getElementById("telemDistEnabled")) {
+          document.getElementById("telemDistEnabled").checked = !!t.distance.enabled;
+          if (t.distance.x !== undefined) document.getElementById("telemDistX").value = t.distance.x;
+          if (t.distance.y !== undefined) document.getElementById("telemDistY").value = t.distance.y;
+        }
+        if (t.battery_pct && document.getElementById("telemBattPctEnabled")) {
+          document.getElementById("telemBattPctEnabled").checked = !!t.battery_pct.enabled;
+          if (t.battery_pct.x !== undefined) document.getElementById("telemBattPctX").value = t.battery_pct.x;
+          if (t.battery_pct.y !== undefined) document.getElementById("telemBattPctY").value = t.battery_pct.y;
+        }
       }
     }
 
     function applyTemplate(t) {
       clearEditMode();
-      if (t === "pure") {
+      if (t === "fitness_hud") {
+        document.getElementById("presetName").value = "Fitness HUD";
+        loadConfigIntoUI({
+          background: { mode: "solid", color: "#060a12", color2: "#101a2d", brightness: 100, vignette: 20 },
+          digital_clock: { enabled: true, layout: "horizontal", show_colon: true, show_seconds: true, seconds_color: "#ff453a", seconds_size: 28, x: 214, y: 196, font_size: 62, color: "#ffffff", color2: "#38bdf8", stroke_width: 1, stroke_color: "#000000", glow_radius: 3, spacing: 4 },
+          analog_hands: { enabled: false },
+          battery: { enabled: true, metric: "battery", style: "ring", color: "#38bdf8", thickness: 6 },
+          weekday: { enabled: true, x: 174, y: 104, font_size: 22, color: "#94a3b8", uppercase: true },
+          date: { enabled: true, format: "MM/DD", x: 282, y: 104, font_size: 22, color: "#f8fafc" },
+          telemetry: {
+            enabled: true, color: "#f1f5f9", font_size: 22, align: 2, show_icons: true,
+            heart_rate: { enabled: true, x: 138, y: 298, align: 2 },
+            calories: { enabled: true, x: 328, y: 298, align: 2 },
+            steps: { enabled: true, x: 233, y: 368, align: 2 },
+            distance: { enabled: false, x: 233, y: 405, align: 2 },
+            battery_pct: { enabled: false, x: 233, y: 58, align: 2 }
+          }
+        });
+      } else if (t === "pure") {
         document.getElementById("presetName").value = "Pure Custom Photo";
         loadConfigIntoUI({ background: { mode: "image", image_data: inlineBgData, brightness: 70, vignette: 15 }, digital_clock: { enabled: false }, analog_hands: { enabled: false }, battery: { enabled: false }, weekday: { enabled: false } });
       } else if (t === "stacked_neon") {
@@ -1825,10 +2031,10 @@
       hud.textContent = `${x}, ${y}`;
       hud.classList.add("show");
 
-      const map = { clock: "clk", weekday: "wk", battery: "batt" };
+      const map = { clock: "clk", date: "date", weekday: "wk", battery: "batt" };
       const pre = map[dragTarget];
-      const layerName = { clock: "Digital Clock", weekday: "Weekday", battery: "Battery" }[dragTarget];
-      const enabledId = { clock: "clkEnabled", weekday: "wkEnabled", battery: "battEnabled" }[dragTarget];
+      const layerName = { clock: "Digital Clock", date: "Date", weekday: "Weekday", battery: "Progress Gauge" }[dragTarget];
+      const enabledId = { clock: "clkEnabled", date: "dateEnabled", weekday: "wkEnabled", battery: "battEnabled" }[dragTarget];
       const enabledEl = document.getElementById(enabledId);
       if (enabledEl && !enabledEl.checked) {
         enabledEl.checked = true;
@@ -1867,15 +2073,16 @@
 
     function handleBgFile(file) {
       if (!file) return;
-      if (!file.type.startsWith("image/")) { toast("Choose an image file (PNG, JPG or WEBP).", true); return; }
+      if (!file.type.startsWith("image/")) { toast("Choose an image or GIF file (PNG, JPG, WEBP or GIF).", true); return; }
       if (file.size > 16 * 1024 * 1024) { toast("Image is larger than 16 MB — use a smaller file.", true); return; }
+      const isGif = file.type === "image/gif" || /\.gif$/i.test(file.name);
       const reader = new FileReader();
       reader.onload = e => {
         inlineBgData = e.target.result;
-        document.getElementById("bgMode").value = "image";
+        document.getElementById("bgMode").value = isGif ? "animated_gif" : "image";
         syncBgUI();
         schedulePreview(0);
-        toast("Background image loaded.");
+        toast(isGif ? "Animated GIF loaded (native Watch 4S 01 2e mode)." : "Background image loaded.");
       };
       reader.readAsDataURL(file);
     }

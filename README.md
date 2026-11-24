@@ -26,14 +26,22 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 - **Pure Image Mode (No Clock):**
   - Full-resolution `466×466` custom artwork with **zero clock digits, zero date, and zero widgets**.
 - **Pro Digital Clock & Typography:**
-  - Horizontal (`HH MM`) or **Stacked Vertical** (`HH` over `MM`) layouts.
+  - Horizontal (`HH:MM` with optional **native blinking colon**) or **Stacked Vertical** (`HH` over `MM`) layouts.
+  - Optional **Live Seconds (`01 18`)** with independent color and font size.
   - Upload any custom `.ttf` or `.otf` font directly in the Studio UI.
   - Vertical color gradients, stroke/outline, neon outer glow, and custom spacing.
+- **Hardware Animated GIF / WebP Dials (`01 2e`):**
+  - Drop any animated `.gif` or `.webp` directly into Studio to compile a native Watch 4S frame-sequence dial (full-screen `466×466` or floating circular medallion) with live animated browser preview and automatic `1.3 MB` flash-budget optimization.
 - **60Hz Rotating Analog Hands:**
   - 4 built-in hand packs (**Omnitrix**, **Classic Needles**, **Neon Pointers**, **Minimalist Baton**) with custom colors, optional second hand, and optional center cap.
-- **Native Widgets:**
-  - **11-Step Battery Indicator:** Outer 360° circular ring, bottom curved arc gauge, horizontal bar, or classic pill icon (auto-switches to red at ≤20%).
-  - **7-Frame Weekday Label (`SUN`–`SAT`):** Custom font, color, uppercase toggle, and draggable position.
+- **Full Native Watch 4S Widgets (Verified Across 210 Official LS26 Dials):**
+  - **Live Date (`01 0f` / `01 0d`):** `MM/DD`, `DD/MM`, `MM-DD`, `DD-MM`, or `DD` with custom font, color, and drag positioning.
+  - **Live Health Telemetry:** Steps (`01 07`), Heart Rate BPM (`01 06` + `01 23` `--` dash glyph), Calories Kcal (`01 09`), Distance km/mi (`01 08` with baseline decimal dot), and Battery % (`01 15`), with Left/Right/Center alignment and optional mini metric icons.
+  - **11-Step Progress Gauges (`01 12`):** Battery (`0x06`), Steps (`0x00`), Calories (`0x02`), or Distance (`0x03`) rendered as an outer 360° ring, bottom curved arc, horizontal bar, or classic pill icon.
+  - **7-Frame Weekday Label (`01 04` `SUN`–`SAT`):** Custom font, color, uppercase toggle, and draggable position.
+- **Zero-Java Pure-Python Haylou Fun APK Patcher (`scripts/patch_and_build_apk.py`):**
+  - Modular CLI patches (`--noclock`, `--unlock-cards`, `--rhr`, `--vitality-vo2`, `--all`) with pure-Python 4-byte/4KB alignment and APK Signature Scheme v2 & v3 signing (`cryptography`) — **no Java, `keytool`, `zipalign`, or Android SDK Build-Tools required**.
+  - Unlocks hidden Watch 4S health cards (PAI, VO2 Max, HRV, Quick Reply), adds a 3rd **Resting Heart Rate** card to Heart Rate Details, and runs on-device **Vitality Score (PAI)** & **VO2 Max** calculation engines.
 - **Ben 10 Omnitrix Generator:**
   - 4 built-in series faceplates (**Alien Force / UAF**, **Original Series**, **Omniverse**, **5 Years Later**) with 6 preset colorways + full custom hex color picker and glow control.
 - **Safe & 100% Reversible:**
@@ -43,32 +51,36 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 
 ## Requirements
 
-- **Python 3.9+** and **Pillow 10.2+** (`pip install -r requirements.txt`)
-- **Android Debug Bridge (`adb`)** in your `PATH` + Android phone with **USB Debugging** enabled
-- **Android SDK Build-Tools** (`zipalign` and `apksigner`) + Java `keytool` *(only needed once to patch your own copy of Haylou Fun)*
-- Your own copy of the official **Haylou Fun v4.0.8 APK** *(not redistributed in this repository)*
+- **Python 3.9+**, **Pillow 10.2+**, and **cryptography 41+** (`pip install -r requirements.txt`)
+- **Android Debug Bridge (`adb`)** in your `PATH` (or Android SDK platform-tools) + Android phone with **USB Debugging** enabled
+- Your own copy of the official **Haylou Fun v4.0.8 APK** *(not redistributed in this repository; zero Java/SDK build-tools needed!)*
 
 ---
 
 ## Getting Started
 
-### 1. Clone & Install Python Dependency
+### 1. Clone & Install Python Dependencies
 ```bash
 git clone https://github.com/toruu7/haylou-watch4s-watchface-maker.git
 cd haylou-watch4s-watchface-maker
 pip install -r requirements.txt
 ```
 
-### 2. Patch & Install Haylou Fun (One-Time Setup)
-Obtain the official `haylou-fun-v4-0-8.apk`, then run the automated patcher. It adds a local `.bin` sideload hook (`classes6.dex`), fixes Facebook SDK key-hash validation for debug-signed builds (`classes3.dex`), aligns `resources.arsc` on a 4-byte boundary, and signs with APK Signature Scheme v2/v3 (auto-generating a local `keystore/debug.keystore` if needed):
+### 2. Patch & Install Haylou Fun (One-Time Pure-Python Setup)
+Obtain the official `haylou-fun-v4-0-8.apk`, then run the zero-dependency pure-Python patcher. It applies all DEX patches, aligns `resources.arsc` (4-byte) and `.so` libraries (4 KB page-aligned), auto-generates a pure-Python RSA-2048 PKCS#12 keystore if missing, and signs with APK Signature Scheme v2 & v3:
 
 ```bash
-python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk
+# Full suite (watchface sideload + FB bypass + card unlocks + Resting HR + Vitality PAI & VO2 Max):
+python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --all
+
+# Or pick individual modular patches:
+python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --noclock
+python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --noclock --unlock-cards --rhr --vitality-vo2
 ```
 
 Connect your Android phone via USB and install the generated APK:
 ```bash
-adb install -r haylou-fun-v4-0-8-noclock.apk
+adb install -r haylou-fun-v4-0-8-full-health.apk
 ```
 > **Important:** Open Google Play Store &rarr; **Haylou Fun** &rarr; **⋮** &rarr; **uncheck "Enable auto update"** so Play Store does not overwrite your patched build.
 
@@ -120,11 +132,17 @@ On Windows, you can also **drag & drop any image** directly onto `make_and_push_
 Full technical notes live in [`docs/protocol_specs.md`](docs/protocol_specs.md) and [`docs/hardware_architecture.md`](docs/hardware_architecture.md).
 
 - **Main Header (`0x00..0x0F`, 16 bytes):**
-  - `uint16` format flags (`0x0002` digital-only, `0x0012` analog/widgets), `uint16 0xFFFF`, `uint32 preview_offset`, `uint16 280`, `uint16 280`, `uint16 digit_table_offset`, `uint16 layout_offset`.
+  - `uint16` format flags (highest layout opcode ID: `0x0002` digital-only, `0x0012` gauges, `0x0018` seconds, `0x0023` telemetry dash, `0x002e` animated GIF), `uint16 0xFFFF`, `uint32 preview_offset`, `uint16 280`, `uint16 280`, `uint16 digit_table_offset`, `uint16 layout_offset`.
+- **Resource & Multiple Digit Font Tables (`dt_off..lo_off`, terminated by `00 00`):**
+  - Optional 8-byte animation header (`00 02 00 00 00 02 01 00`) when `01 2e` / `01 1a` animations are present, followed by one or more 83-byte digit tables (`01 01 <id>` + `10 × <IHH`).
 - **Layout Stream Elements (back-to-front, terminated by `0x0000`):**
-  - `01 00` — Static image (`466×466` background or overlay cap)
-  - `01 02` — 4-digit digital clock `(x1, y1 .. x4, y4)` referencing digit table `01 01`
-  - `01 12 06 0b` — 11-frame battery progress (`0%..100%`)
+  - `01 00` — Static image (`466×466` background, date separator, or hand cap)
+  - `01 2e` — Hardware animated multi-frame sprite / GIF loop (`mode, count, loop, autoplay, interval, x, y, w, h, offsets[]`)
+  - `01 02` — 4-digit digital clock (34 B: 4 digit coords + optional 12-byte blinking colon sprite)
+  - `01 18` — Live seconds (`SS`)
+  - `01 0f` / `01 0d` — Live month (`MM`) and day (`DD`)
+  - `01 06` / `01 07` / `01 08` / `01 09` / `01 15` — Live Heart Rate BPM (with `01 23` `--` dash), Steps, Distance (with `.` dot), Calories Kcal, and Battery %
+  - `01 12` — 11-frame progress gauges (`sub`: `0x06` Battery, `0x00` Steps, `0x02` Calories, `0x03` Distance)
   - `01 04 01` — 7-frame weekday (`SUN..SAT`)
   - `01 0a <0|1|2>` — 60Hz rotating analog Hour (`0`), Minute (`1`), and Second (`2`) hands pivoted around `(233, 233)`
 - **Pixel Codec (ARGB565 + Per-Row RLE):**

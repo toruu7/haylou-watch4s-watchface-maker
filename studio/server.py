@@ -31,7 +31,11 @@ PROJECT_DIR = os.path.abspath(os.path.join(STUDIO_DIR, ".."))
 SCRIPTS_DIR = os.path.join(PROJECT_DIR, "scripts")
 PRESETS_DIR = os.path.join(PROJECT_DIR, "presets")
 FONTS_DIR = os.path.join(PROJECT_DIR, "fonts")
-MODDED_APK = os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-noclock.apk")
+MODDED_APK_CANDIDATES = (
+    os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-full-health.apk"),
+    os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-noclock.apk"),
+)
+MODDED_APK = MODDED_APK_CANDIDATES[1]
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("STUDIO_PORT", "8466"))
@@ -41,14 +45,20 @@ MAX_BIN_BYTES = 8 * 1024 * 1024
 MAX_FONT_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 FONT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"OTTO", b"ttcf", b"wOFF", b"wOF2")
-KNOWN_BIN_FLAGS = (0x0002, 0x0012, 0x0023)
-BUNDLE_FILES = ("meta.json", "config.json", "preview.png", "source.png", "watchface.bin")
+KNOWN_BIN_FLAGS = (
+    0x0002, 0x0004, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000D,
+    0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0014, 0x0015, 0x0018,
+    0x001A, 0x001B, 0x001C, 0x001D, 0x001F, 0x0023, 0x0025, 0x002E,
+)
+BUNDLE_FILES = ("meta.json", "config.json", "preview.png", "source.png", "source.gif", "source.webp", "watchface.bin")
 
 sys.path.insert(0, SCRIPTS_DIR)
-from watchface_bin_maker import push_bin_to_phone
+from watchface_bin_maker import find_adb, push_bin_to_phone
 from watchface_compiler import (
     compile_config_to_bin,
     decode_bin_preview,
+    inspect_watchface_bin,
+    render_config_animated_preview,
     render_config_preview,
 )
 
@@ -84,7 +94,14 @@ def valid_bin(raw):
     if not (16 <= len(raw) <= MAX_BIN_BYTES):
         return False
     flags, magic = struct.unpack_from("<HH", raw, 0)
-    return flags in KNOWN_BIN_FLAGS and magic == 0xFFFF
+    return (flags in KNOWN_BIN_FLAGS or 0x0001 <= flags <= 0x00FF) and magic == 0xFFFF
+
+
+def resolve_modded_apk():
+    for cand in MODDED_APK_CANDIDATES:
+        if os.path.isfile(cand):
+            return cand
+    return MODDED_APK
 
 
 def origin_allowed(headers):
@@ -105,9 +122,10 @@ def check_adb():
     if _adb_cache["value"] is not None and now - _adb_cache["at"] < 8:
         return _adb_cache["value"]
 
+    adb = find_adb()
     result = {"connected": False, "detail": "No phone connected via USB"}
     try:
-        res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=4)
+        res = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=4)
         if res.returncode != 0:
             result = {"connected": False, "detail": "ADB not found or failed to start"}
         else:
@@ -128,7 +146,7 @@ def check_adb():
                 installed = False
                 try:
                     pr = subprocess.run(
-                        ["adb", "-s", serial, "shell", "pm", "path", "com.yingsheng.hayloufun"],
+                        [adb, "-s", serial, "shell", "pm", "path", "com.yingsheng.hayloufun"],
                         capture_output=True, text=True, timeout=4,
                     )
                     installed = pr.returncode == 0 and "base.apk" in pr.stdout
@@ -233,33 +251,58 @@ def summarize_config(cfg):
     mode = bg.get("mode")
     if mode == "omnitrix":
         parts.append(f"Omnitrix ({bg.get('omni_style', 'alien_force').upper()})")
+    elif mode == "animated_gif":
+        parts.append(f"Animated GIF ({bg.get('anim_frames', 8)}f @ {bg.get('anim_fps', 4)}fps)")
     elif mode == "pipboy":
         parts.append("Pip-Boy 3000 (CRT Terminal)")
     elif mode == "image":
         parts.append("Custom Image")
     else:
         parts.append("Gradient/Solid")
-    if cfg.get("digital_clock", {}).get("enabled"):
-        parts.append(f"Digital ({cfg['digital_clock'].get('layout', 'horizontal')})")
+    clk = cfg.get("digital_clock", {})
+    if clk.get("enabled"):
+        s = f"Digital ({clk.get('layout', 'horizontal')})"
+        if clk.get("show_seconds"):
+            s += "+Sec"
+        parts.append(s)
+    if cfg.get("date", {}).get("enabled"):
+        parts.append(f"Date ({cfg['date'].get('format', 'MM/DD')})")
     if cfg.get("analog_hands", {}).get("enabled"):
         parts.append(f"Hands ({cfg['analog_hands'].get('style', 'omnitrix')})")
     if cfg.get("battery", {}).get("enabled"):
-        parts.append(f"Battery ({cfg['battery'].get('style', 'ring')})")
+        metric = cfg["battery"].get("metric", "battery").capitalize()
+        parts.append(f"{metric} ({cfg['battery'].get('style', 'ring')})")
     if cfg.get("weekday", {}).get("enabled"):
         parts.append("Weekday")
-    if cfg.get("telemetry", {}).get("enabled"):
-        parts.append("Live Telemetry (Steps, BPM, Cal)")
-    if len(parts) == 1:
+    telem = cfg.get("telemetry", {})
+    if telem.get("enabled"):
+        tlist = []
+        for k, lbl in (("steps", "Steps"), ("heart_rate", "HR"), ("calories", "Cal"), ("distance", "Dist"), ("battery_pct", "Batt%")):
+            if isinstance(telem.get(k), dict) and telem[k].get("enabled"):
+                tlist.append(lbl)
+        if tlist:
+            parts.append("Live " + "/".join(tlist))
+    if len(parts) == 1 and mode != "animated_gif":
         parts.append("Pure Image · No Clock")
     return " · ".join(parts)
 
 
+def _detect_image_ext(raw):
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return ".webp"
+    if raw[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    return ".png"
+
+
 def resolve_config_image(cfg, temp_dir=None, filename=None):
-    """Write inline base64 image data to a unique/requested file and point config at it."""
+    """Write inline base64 image/GIF data to a unique/requested file and point config at it."""
     cfg_copy = json.loads(json.dumps(cfg))
     bg = cfg_copy.get("background", {})
     img_b64 = bg.pop("image_data", None)
-    if bg.get("mode") == "image" and img_b64:
+    if bg.get("mode") in ("image", "animated_gif") and img_b64:
         if "," in img_b64:
             img_b64 = img_b64.split(",", 1)[1]
         raw = base64.b64decode(img_b64)
@@ -267,7 +310,12 @@ def resolve_config_image(cfg, temp_dir=None, filename=None):
             raise ValueError("Image too large (limit 16 MB).")
         out_dir = temp_dir or tempfile.gettempdir()
         os.makedirs(out_dir, exist_ok=True)
-        name = filename or f"studio_source_{uuid.uuid4().hex}.png"
+        ext = _detect_image_ext(raw)
+        if filename:
+            base_stem = os.path.splitext(filename)[0]
+            name = base_stem + (ext if ext in (".gif", ".webp") else ".png")
+        else:
+            name = f"studio_source_{uuid.uuid4().hex}{ext}"
         img_path = os.path.join(out_dir, name)
         with open(img_path, "wb") as f:
             f.write(raw)
@@ -396,10 +444,12 @@ class StudioHandler(BaseHTTPRequestHandler):
                 inner = cfg.pop("config")
                 for k, v in inner.items():
                     cfg.setdefault(k, v)
-            src_img = os.path.join(pdir, "source.png")
-            if os.path.exists(src_img):
-                with open(src_img, "rb") as f:
-                    cfg.setdefault("background", {})["image_data"] = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+            for cand_name, mime in (("source.gif", "image/gif"), ("source.webp", "image/webp"), ("source.png", "image/png")):
+                src_img = os.path.join(pdir, cand_name)
+                if os.path.exists(src_img):
+                    with open(src_img, "rb") as f:
+                        cfg.setdefault("background", {})["image_data"] = f"data:{mime};base64," + base64.b64encode(f.read()).decode("ascii")
+                    break
             self.send_json({"ok": True, "id": pid, "name": meta.get("name", pid), "config": cfg})
         elif path == "/api/preset-bundle":
             qs = urllib.parse.parse_qs(parsed.query)
@@ -447,6 +497,21 @@ class StudioHandler(BaseHTTPRequestHandler):
                 cfg = body.get("config", {})
                 with tempfile.TemporaryDirectory(prefix="studio_preview_") as td:
                     resolved = resolve_config_image(cfg, temp_dir=td)
+                    anim_frames, dur_ms = render_config_animated_preview(resolved)
+                    if anim_frames and len(anim_frames) >= 2:
+                        buf = io.BytesIO()
+                        pal_frames = [f.convert("RGBA") for f in anim_frames]
+                        pal_frames[0].save(
+                            buf,
+                            format="GIF",
+                            save_all=True,
+                            append_images=pal_frames[1:],
+                            duration=dur_ms,
+                            loop=0,
+                            disposal=2,
+                        )
+                        self.send_bytes(buf.getvalue(), "image/gif")
+                        return
                     img = render_config_preview(resolved)
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
@@ -478,16 +543,20 @@ class StudioHandler(BaseHTTPRequestHandler):
                     pid = edit_id
 
                 resolved = resolve_config_image(cfg, temp_dir=pdir, filename="source.png")
-                if resolved.get("background", {}).get("mode") == "image" and not resolved["background"].get("image_path"):
-                    existing_src = os.path.join(pdir, "source.png")
-                    if os.path.exists(existing_src):
-                        resolved["background"]["image_path"] = existing_src
+                if resolved.get("background", {}).get("mode") in ("image", "animated_gif") and not resolved["background"].get("image_path"):
+                    for cand_name in ("source.gif", "source.webp", "source.png"):
+                        existing_src = os.path.join(pdir, cand_name)
+                        if os.path.exists(existing_src):
+                            resolved["background"]["image_path"] = existing_src
+                            break
 
                 bin_path = os.path.join(pdir, "watchface.bin")
                 prev_path = os.path.join(pdir, "preview.png")
                 compile_config_to_bin(resolved, bin_path, save_preview_path=prev_path)
-                if not valid_bin(open(bin_path, "rb").read()):
-                    self.send_json({"ok": False, "error": "Compiler produced an invalid .bin — not saved."}, 500)
+                raw_bin = open(bin_path, "rb").read()
+                info = inspect_watchface_bin(raw_bin)
+                if not valid_bin(raw_bin) or not info["valid"]:
+                    self.send_json({"ok": False, "error": f"Compiler produced an invalid .bin: {info.get('errors')}"}, 500)
                     return
 
                 with open(os.path.join(pdir, "config.json"), "w", encoding="utf-8") as f:
@@ -497,18 +566,21 @@ class StudioHandler(BaseHTTPRequestHandler):
                                "created_at": int(time.time())}, f, indent=2)
 
                 pushed = False
-                message = f"Saved '{name}' to Presets."
+                size_kb = round(len(raw_bin) / 1024.0, 1)
+                budget_note = "" if info["within_flash_budget"] else " (Warning: >1.3 MB flash budget)"
+                message = f"Saved '{name}' ({size_kb} KB) to Presets.{budget_note}"
                 if auto_push:
                     if not check_adb()["connected"]:
-                        message = f"Saved '{name}', but no phone is connected — push skipped."
+                        message = f"Saved '{name}' ({size_kb} KB), but no phone is connected — push skipped."
                     else:
-                        subprocess.run(["adb", "shell", "mkdir", "-p",
+                        adb = find_adb()
+                        subprocess.run([adb, "shell", "mkdir", "-p",
                                         "/sdcard/Android/data/com.yingsheng.hayloufun/cache"],
                                        capture_output=True)
                         pushed = push_bin_to_phone(bin_path)
-                        message = (f"Saved & pushed '{name}'! Open Haylou Fun → Dial Center → install any free cloud dial."
+                        message = (f"Saved & pushed '{name}' ({size_kb} KB)! Open Haylou Fun → Dial Center → install any free cloud dial."
                                    if pushed else f"Saved '{name}', but the push failed — check the USB connection.")
-                self.send_json({"ok": True, "id": os.path.basename(pdir), "pushed": pushed, "message": message})
+                self.send_json({"ok": True, "id": os.path.basename(pdir), "pushed": pushed, "size_kb": size_kb, "message": message})
             except Exception as exc:
                 self.send_json({"ok": False, "error": f"Could not save: {exc}"}, 500)
 
@@ -677,7 +749,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             if not check_adb()["connected"]:
                 self.send_json({"ok": False, "error": "No phone connected — check USB and USB debugging."}, 400)
                 return
-            subprocess.run(["adb", "shell", "mkdir", "-p",
+            adb = find_adb()
+            subprocess.run([adb, "shell", "mkdir", "-p",
                             "/sdcard/Android/data/com.yingsheng.hayloufun/cache"], capture_output=True)
             if push_bin_to_phone(bin_path):
                 self.send_json({"ok": True, "message": "Pushed! Open Haylou Fun → Dial Center → install any free cloud dial."})
@@ -685,21 +758,23 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "ADB push failed — unlock the phone and try again."}, 500)
 
         elif path == "/api/install-apk":
-            if not os.path.isfile(MODDED_APK):
+            apk_path = resolve_modded_apk()
+            if not os.path.isfile(apk_path):
                 self.send_json({"ok": False, "error": "Modded APK not found — build it first with scripts/patch_and_build_apk.py."}, 404)
                 return
             status = check_adb()
             if not status["connected"]:
                 self.send_json({"ok": False, "error": "No phone connected — check USB and USB debugging."}, 400)
                 return
+            adb = find_adb()
             try:
-                res = subprocess.run(["adb", "install", "-r", MODDED_APK],
+                res = subprocess.run([adb, "install", "-r", apk_path],
                                      capture_output=True, text=True, timeout=180)
                 if res.returncode == 0:
-                    subprocess.run(["adb", "shell", "am", "start", "-n",
+                    subprocess.run([adb, "shell", "am", "start", "-n",
                                     "com.yingsheng.hayloufun/com.liesheng.hayloufun.SplashActivity"],
                                    capture_output=True)
-                    self.send_json({"ok": True, "message": "Modded Haylou Fun installed & launched."})
+                    self.send_json({"ok": True, "message": f"Installed & launched {os.path.basename(apk_path)}."})
                 else:
                     self.send_json({"ok": False, "error": (res.stderr or res.stdout).strip()[:400]}, 500)
             except Exception as exc:

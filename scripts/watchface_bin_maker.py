@@ -13,6 +13,7 @@ Supports:
 
 import argparse
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -226,12 +227,48 @@ def build_watchface_bin(bg_path, out_bin_path, no_clock=True, clock_pos=None, fo
     print(f"    Output: {out_bin_path} ({len(out):,} bytes / {len(out)/1024:.1f} KB)")
     return out_bin_path
 
+def find_adb():
+    """Locate a working adb executable (PATH, Android SDK platform-tools, or common Windows bundles)."""
+    env_adb = os.environ.get("ADB_PATH")
+    if env_adb and os.path.isfile(env_adb):
+        return env_adb
+
+    candidates = []
+    if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA", "")
+        roaming_app = os.environ.get("APPDATA", "")
+        candidates.extend([
+            os.path.join(local_app, "Android", "Sdk", "platform-tools", "adb.exe"),
+            os.path.join(roaming_app, "GeeLark", "scrcpy", "adb.exe"),
+            r"C:\platform-tools\adb.exe",
+        ])
+    else:
+        candidates.extend([
+            os.path.expanduser("~/Android/Sdk/platform-tools/adb"),
+            os.path.expanduser("~/Library/Android/sdk/platform-tools/adb"),
+        ])
+
+    which_adb = shutil.which("adb")
+    if which_adb:
+        # Avoid known incompatible v40 adb wrappers when a modern v41+ adb is also installed
+        if "superdisplay" in which_adb.lower():
+            candidates.append(which_adb)
+        else:
+            candidates.insert(0, which_adb)
+
+    for cand in candidates:
+        if cand and os.path.isfile(cand):
+            return cand
+    return "adb"
+
+
 def push_bin_to_phone(bin_path):
+    adb = find_adb()
     dest = "/sdcard/Android/data/com.yingsheng.hayloufun/cache/ls25plate.bin"
     print(f"[*] Pushing {os.path.basename(bin_path)} -> {dest} via ADB...")
-    res = subprocess.run(["adb", "push", bin_path, dest], capture_output=True, text=True)
+    res = subprocess.run([adb, "push", bin_path, dest], capture_output=True, text=True)
     if res.returncode == 0:
-        print(f"[+] Pushed successfully! Now tap Install/Sync on ANY free cloud dial in Haylou Fun!")
+        print("[+] Pushed successfully! Now tap Install/Sync on ANY free cloud dial in Haylou Fun!")
         return True
     else:
         print(f"[-] ADB push failed: {res.stderr.strip()}")
