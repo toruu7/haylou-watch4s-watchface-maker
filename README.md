@@ -40,8 +40,8 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
   - **11-Step Progress Gauges (`01 12`):** Battery (`0x06`), Steps (`0x00`), Calories (`0x02`), or Distance (`0x03`) rendered as an outer 360° ring, bottom curved arc, horizontal bar, or classic pill icon.
   - **7-Frame Weekday Label (`01 04` `SUN`–`SAT`):** Custom font, color, uppercase toggle, and draggable position.
 - **Zero-Java Pure-Python Haylou Fun APK Patcher (`scripts/patch_and_build_apk.py`):**
-  - Modular CLI patches (`--noclock`, `--unlock-cards`, `--rhr`, `--vitality-vo2`, `--night-raise-to-wake`, `--cycling-fixes`, `--all`) with pure-Python 4-byte/4KB alignment and APK Signature Scheme v2 & v3 signing (`cryptography`) — **no Java, `keytool`, `zipalign`, or Android SDK Build-Tools required**.
-  - Unlocks hidden Watch 4S health cards (PAI, VO2 Max, HRV, Quick Reply), adds a 3rd **Resting Heart Rate** card to Heart Rate Details, runs on-device **Vitality Score (PAI)** & **VO2 Max** calculation engines, unlocks a **Night Raise-to-Wake Schedule** (**Device settings → DND mode**, wired exclusively to BLE `0x72` `sendQuickViewTime` so wrist-wake turns off at night, default `23:00–07:00`, while calls & notifications stay active), and adds **Cycling Fixes** (strips handlebar-vibration phantom cycling steps from Haylou Fun & Health Connect while preserving bike distance/calories, computes true moving time & moving average speed on synced GPS rides, and adds live GPS auto-pause/auto-resume for phone-started rides).
+  - Modular CLI patches (`--noclock`, `--unlock-cards`, `--rhr`, `--vitality-vo2`, `--night-raise-to-wake`, `--cycling-fixes`, `--voip-calls`, `--all`) with pure-Python 4-byte/4KB alignment and APK Signature Scheme v2 & v3 signing (`cryptography`) — **no Java, `keytool`, `zipalign`, or Android SDK Build-Tools required**.
+  - Unlocks hidden Watch 4S health cards (PAI, VO2 Max, HRV), adds a 3rd **Resting Heart Rate** card to Heart Rate Details, runs on-device **Vitality Score (PAI)** & **VO2 Max** calculation engines, unlocks a **Night Raise-to-Wake Schedule** (**Device settings → DND mode**, wired exclusively to BLE `0x72` `sendQuickViewTime` so wrist-wake turns off at night, default `23:00–07:00`, while calls & notifications stay active), adds **Cycling Fixes** (strips handlebar-vibration phantom cycling steps from Haylou Fun & Health Connect while preserving bike distance/calories, computes true moving time & moving average speed on synced GPS rides, and adds live GPS auto-pause/auto-resume for phone-started rides), and adds **VoIP Incoming Call Alerts + Wrist Reject** (WhatsApp, WhatsApp Business, Messenger, Instagram, Telegram, Viber, and Discord ring Watch 4S with the real caller name via BLE `0x41` and execute the VoIP app's Decline action when rejected from the wrist).
 - **Ben 10 Omnitrix Generator:**
   - 4 built-in series faceplates (**Alien Force / UAF**, **Original Series**, **Omniverse**, **5 Years Later**) with 6 preset colorways + full custom hex color picker and glow control.
 - **Safe & 100% Reversible:**
@@ -70,7 +70,7 @@ pip install -r requirements.txt
 Obtain the official `haylou-fun-v4-0-8.apk`, then run the zero-dependency pure-Python patcher. It applies all DEX patches, aligns `resources.arsc` (4-byte) and `.so` libraries (4 KB page-aligned), auto-generates a pure-Python RSA-2048 PKCS#12 keystore if missing, and signs with APK Signature Scheme v2 & v3:
 
 ```bash
-# Full suite (watchface sideload + FB bypass + card unlocks + Resting HR + Vitality PAI & VO2 Max + Night Raise-to-Wake + Cycling Fixes):
+# Full suite (watchface sideload + FB bypass + card unlocks + Resting HR + Vitality PAI & VO2 Max + Night Raise-to-Wake + Cycling Fixes + VoIP Calls):
 python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --all
 
 # Custom default night-off window for Raise-to-Wake (default: 23:00-07:00 -> active 07:00-23:00):
@@ -78,7 +78,7 @@ python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --all
 
 # Or pick individual modular patches:
 python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --noclock
-python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --noclock --unlock-cards --rhr --vitality-vo2 --night-raise-to-wake --cycling-fixes
+python scripts/patch_and_build_apk.py --src /path/to/haylou-fun-v4-0-8.apk --noclock --unlock-cards --rhr --vitality-vo2 --night-raise-to-wake --cycling-fixes --voip-calls
 ```
 
 Connect your Android phone via USB and install the generated APK:

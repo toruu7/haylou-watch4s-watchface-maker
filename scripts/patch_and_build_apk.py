@@ -9,7 +9,7 @@ Modular patch flags (default: --all):
                   2) classes3.dex: Bypass Facebook SDK release signature hash
                   3) classes6.dex: Sideload (or capture) custom ls25plate.bin from external cache dir
   --unlock-cards  classes7.dex: Unlock Watch 4S hidden WatchConfig features
-                  (PAI/Vitality, VO2 Max, HRV, Quick SMS Reply, WhatsApp Quick Reply)
+                  (PAI/Vitality, VO2 Max, HRV; keeps firmware-unsupported Quick Reply stock)
   --rhr           classes7.dex: Add 3rd "Resting heart rate" StatCard to Heart Rate Details
                   (Day tab + Week/Month/Year tabs, computed from lowest quiet HR window)
   --vitality-vo2  classes6.dex: Computed Vitality Score (PAI) + VO2 Max engines
@@ -26,6 +26,10 @@ Modular patch flags (default: --all):
                      (excludes < 3.06 km/h stops while preserving ride distance & calories)
                   3) Live GPS auto-pause & auto-resume for phone-started cycling
                      (auto-pauses phone + watch at < 3.6 km/h for 5s, auto-resumes >= 5.4 km/h)
+  --voip-calls    classes6.dex: VoIP incoming call alerts + wrist reject for Watch 4S
+                  (WhatsApp, WhatsApp Business, Messenger, Instagram, Telegram, Viber, Discord):
+                  rings Watch 4S with real caller name via BLE 0x41, stops ringing when
+                  answered/missed, and executes the VoIP app's Decline action on watch Reject.
 """
 
 from __future__ import annotations
@@ -58,8 +62,21 @@ WATCHCONFIG_UNLOCK_METHODS = (
     ("Vitality/PAI", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportPai()Z"),
     ("VO2 Max", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportVo2Max()Z"),
     ("HRV", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportHrv()Z"),
-    ("Quick SMS Reply", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportQuickReplyMsg()Z"),
-    ("WhatsApp Quick Reply", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportWhatsAppQuickReplyMsg()Z"),
+)
+
+# Watch 4S (LS26) firmware silently ignores both QuickResponses (0xB9 0x19) and ReplyApp (0xBB 0x21/0x17);
+# restore these getters to stock field reads if an earlier patched APK forced them true.
+WATCHCONFIG_RESTORE_STOCK = (
+    (
+        "Quick SMS Reply",
+        "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportQuickReplyMsg()Z",
+        "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportQuickReplyMsg:Z",
+    ),
+    (
+        "WhatsApp Quick Reply",
+        "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportWhatsAppQuickReplyMsg()Z",
+        "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportWhatsAppQuickReplyMsg:Z",
+    ),
 )
 
 
@@ -2657,11 +2674,637 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
 
 
 # --------------------------------------------------------------------------- #
+# 3e. classes6.dex — VoIP Incoming Call Alerts + Wrist Reject (--voip-calls)
+# --------------------------------------------------------------------------- #
+
+def _encode_uleb128(val: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = val & 0x7F
+        val >>= 7
+        if val:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return bytes(out)
+
+
+def _build_voip_call_helper_insns(refs: dict, insns_words: int = 792) -> tuple[bytes, list[tuple[int, int, int]]]:
+    """
+    Build Lcom/jieli/jl_bt_ota/util/CommonUtil;->checkAllNotNull([Ljava/lang/Object;)V
+    (swapped into OtaCmdHandler.parseDataToCmd, 812w -> 792w insns + 3 try_items/catch_alls,
+    regs=14, ins=1, outs=6, p0=v13).
+
+    Dispatch on Object[] arr (v13):
+      - len == 2 ({sbn, sbn}):    Notification posted -> detect VoIP incoming call (WhatsApp,
+                                  WhatsApp Business, Messenger, Instagram, Telegram, Viber, Discord)
+                                  via BOTH modern Android 12+ Notification.CallStyle extras
+                                  ("android.declineIntent" / "android.hangUpIntent" /
+                                  "android.callPerson") AND legacy 2-action call notifications,
+                                  ring Watch 4S with real caller name via BLE 0x41, cache Decline
+                                  PendingIntent, set arr[0]=null to suppress duplicate text alert.
+      - len == 1, arr[0] != null: Notification removed -> stop Watch 4S ringing if matching VoIP pkg
+                                  AND removed notification was a call (ongoing/insistent or has
+                                  "android.declineIntent"), ignoring unrelated chat dismissals.
+      - len == 1, arr[0] == null: Watch 4S REJECT_INCOMING (IDataHelper.g) -> execute cached VoIP
+                                  Decline PendingIntent inside try/catch, stop ringing, set arr[0]=arr.
+      - len == 0 ({}):            Phone answered/missed (AppApplication$b.a/.c) -> stop VoIP ringing.
+    """
+    KEY_DECLINE = b"android.declineIntent"
+    KEY_HANGUP = b"android.hangUpIntent"
+    KEY_PERSON = b"android.callPerson"
+
+    a = DalvikAssembler()
+
+    def emit_str(dst_reg: int, tmp_reg: int, raw_len: int, payload_label: str):
+        a.const16(tmp_reg, raw_len)
+        a.new_array(tmp_reg, tmp_reg, refs["T_BYTE_ARR"])
+        a.fill_array_data(tmp_reg, payload_label)
+        a.new_instance(dst_reg, refs["T_STRING"])
+        a.invoke_direct([dst_reg, tmp_reg], refs["M_STR_INIT_BYTES"])
+
+    a.if_eqz(13, "v_ret")
+    a.sget_object(12, refs["F_Z7I_A"])
+    a.if_eqz(12, "v_ret")
+
+    a.array_length(0, 13)
+    a.if_eqz(0, "br_clear")
+    a.const4(1, 2)
+    a.if_eq(0, 1, "br_posted")
+    a.const4(1, 0)
+    a.aget_object(11, 13, 1)
+    a.if_eqz(11, "br_reject")
+
+    # ---- Branch B: Notification removed (arr = {sbn}) ----
+    a.check_cast(11, refs["T_SBN"])
+    a.invoke_virtual([11], refs["M_SBN_PKG"])
+    a.move_result_object(10)
+    a.if_eqz(10, "v_ret")
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_GET"])
+    a.move_result_object(1)
+    a.if_eqz(1, "v_ret")
+    a.invoke_virtual([10, 1], refs["M_STR_EQ"])
+    a.move_result(0)
+    a.if_eqz(0, "v_ret")
+    # Only clear ringing if removed notification was actually a call (ongoing/insistent or CallStyle declineIntent)
+    a.invoke_virtual([11], refs["M_SBN_NOTIF"])
+    a.move_result_object(9)
+    a.if_eqz(9, "br_clear")
+    a.iget(0, 9, refs["F_NOTIF_FLAGS"])
+    a.and_int_lit8(0, 0, 6)
+    a.if_nez(0, "br_clear")
+    a.iget_object(5, 9, refs["F_NOTIF_EXTRAS"])
+    a.if_eqz(5, "v_ret")
+    emit_str(1, 0, len(KEY_DECLINE), "data_decline")
+    a.invoke_virtual([5, 1], refs["M_BASE_CONTAINS_KEY"])
+    a.move_result(0)
+    a.if_eqz(0, "v_ret")
+
+    # ---- Branch D: Clear active VoIP call & send BLE 0x41 off-hook ----
+    a.label("br_clear")
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_REMOVE"])
+    a.move_result_object(6)
+    a.const_string(0, refs["STR_KEY_REJECT"])
+    a.invoke_virtual([12, 0], refs["M_MAP_REMOVE"])
+    a.if_eqz(6, "v_ret")
+
+    a.label("send_offhook")
+    a.const_class(0, refs["T_Z7D"])
+    a.invoke_static([0], refs["M_Z7I_C"])
+    a.move_result_object(0)
+    a.if_eqz(0, "v_ret")
+    a.check_cast(0, refs["T_Z7D"])
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(1)
+    a.const4(3, 0)  # isIncoming = false -> sendCall0ffHook()
+    a.const_string(4, refs["STR_EMPTY"])
+    a.const_string(5, refs["STR_EMPTY"])
+    a.invoke_interface_range(0, 6, refs["M_Z7D_C"])
+    a.return_void()
+
+    # ---- Branch C: Watch 4S Reject button -> fire cached Decline PendingIntent ----
+    a.label("br_reject")
+    a.const_string(0, refs["STR_KEY_REJECT"])
+    a.invoke_virtual([12, 0], refs["M_MAP_REMOVE"])
+    a.move_result_object(6)
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_REMOVE"])
+    a.if_eqz(6, "v_ret")
+    a.check_cast(6, refs["T_PENDING_INTENT"])
+    a.const4(0, 0)
+    a.aput_object(13, 13, 0)  # arr[0] = non-null -> handled VoIP reject
+    a.move_object(0, 6)
+    a.invoke_static([], refs["M_HYAPP_CTX"])
+    a.move_result_object(1)
+    a.const4(2, 0)
+    a.const4(3, 0)
+    a.label("try_pi_start")
+    a.invoke_virtual([0, 1, 2, 3], refs["M_PI_SEND"])
+    a.label("try_pi_end")
+    a.goto16("send_offhook")
+    a.label("catch_pi")
+    a.move_exception(0)
+    a.goto16("send_offhook")
+
+    # ---- Branch A: Notification posted (arr = {sbn, sbn}) ----
+    a.label("br_posted")
+    a.const4(0, 0)
+    a.aget_object(11, 13, 0)
+    a.if_eqz(11, "v_ret")
+    a.check_cast(11, refs["T_SBN"])
+    a.invoke_virtual([11], refs["M_SBN_PKG"])
+    a.move_result_object(10)
+    a.if_eqz(10, "v_ret")
+
+    # Match supported VoIP packages
+    for skey in (
+        "STR_PKG_WA", "STR_PKG_WAB", "STR_PKG_ORCA",
+        "STR_PKG_IG", "STR_PKG_TG", "STR_PKG_VIBER", "STR_PKG_DISCORD",
+    ):
+        a.const_string(0, refs[skey])
+        a.invoke_virtual([10, 0], refs["M_STR_EQ"])
+        a.move_result(0)
+        a.if_nez(0, "post_pkg_ok")
+    a.goto16("v_ret")
+
+    a.label("post_pkg_ok")
+    a.invoke_virtual([11], refs["M_SBN_NOTIF"])
+    a.move_result_object(9)
+    a.if_eqz(9, "v_ret")
+    a.iget_object(5, 9, refs["F_NOTIF_EXTRAS"])
+
+    # Path 1: Modern Android 12+ Notification.CallStyle extras ("android.declineIntent" / "android.hangUpIntent")
+    a.if_eqz(5, "post_legacy_check")
+    emit_str(1, 0, len(KEY_DECLINE), "data_decline")
+    a.invoke_virtual([5, 1], refs["M_BASE_CONTAINS_KEY"])
+    a.move_result(0)
+    a.if_eqz(0, "post_chk_hangup")
+    a.label("try_dec_start")
+    a.invoke_virtual([5, 1], refs["M_BUNDLE_GET_PARCELABLE"])
+    a.label("try_dec_end")
+    a.move_result_object(6)
+    a.instance_of(0, 6, refs["T_PENDING_INTENT"])
+    a.if_eqz(0, "post_legacy_check")
+    a.check_cast(6, refs["T_PENDING_INTENT"])
+    a.goto16("post_have_decline")
+
+    a.label("catch_dec")
+    a.move_exception(0)
+    a.goto16("post_legacy_check")
+
+    # CallStyle ongoing call transition ("android.hangUpIntent"): stop watch ringing if we were ringing for this pkg
+    a.label("post_chk_hangup")
+    emit_str(1, 0, len(KEY_HANGUP), "data_hangup")
+    a.invoke_virtual([5, 1], refs["M_BASE_CONTAINS_KEY"])
+    a.move_result(0)
+    a.if_eqz(0, "post_legacy_check")
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_GET"])
+    a.move_result_object(1)
+    a.if_eqz(1, "v_ret")
+    a.invoke_virtual([10, 1], refs["M_STR_EQ"])
+    a.move_result(0)
+    a.if_eqz(0, "v_ret")
+    a.const4(0, 0)
+    a.const4(1, 0)
+    a.aput_object(1, 13, 0)  # consume ongoing-call transition notification
+    a.goto16("br_clear")
+
+    # Path 2: Legacy / custom non-CallStyle incoming call notifications
+    a.label("post_legacy_check")
+    # Must have FLAG_ONGOING_EVENT (0x02) or FLAG_INSISTENT (0x04) — excludes all regular chat notifications
+    a.iget(0, 9, refs["F_NOTIF_FLAGS"])
+    a.and_int_lit8(0, 0, 6)
+    a.if_eqz(0, "v_ret")
+
+    a.iget_object(8, 9, refs["F_NOTIF_ACTIONS"])
+    a.if_eqz(8, "v_ret")
+    a.array_length(0, 8)
+    a.const4(1, 2)
+    a.if_eq(0, 1, "post_chk_2act")
+
+    # Legacy 1-action ongoing call transition while ringing -> clear watch alert
+    a.const4(1, 1)
+    a.if_ne(0, 1, "v_ret")
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_GET"])
+    a.move_result_object(1)
+    a.if_eqz(1, "v_ret")
+    a.invoke_virtual([10, 1], refs["M_STR_EQ"])
+    a.move_result(0)
+    a.if_eqz(0, "v_ret")
+    a.const4(0, 0)
+    a.const4(1, 0)
+    a.aput_object(1, 13, 0)
+    a.goto16("br_clear")
+
+    # Legacy incoming call notification: exactly 2 actions (Decline, Answer), neither with RemoteInput
+    a.label("post_chk_2act")
+    a.const4(0, 0)
+    a.aget_object(7, 8, 0)  # v7 = actions[0] (Decline)
+    a.if_eqz(7, "v_ret")
+    a.invoke_virtual([7], refs["M_ACT_REMOTE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "act0_ok")
+    a.array_length(0, 0)
+    a.if_nez(0, "v_ret")
+
+    a.label("act0_ok")
+    a.const4(0, 1)
+    a.aget_object(1, 8, 0)  # v1 = actions[1] (Answer)
+    a.if_eqz(1, "v_ret")
+    a.invoke_virtual([1], refs["M_ACT_REMOTE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "act1_ok")
+    a.array_length(0, 0)
+    a.if_nez(0, "v_ret")
+
+    a.label("act1_ok")
+    a.iget_object(6, 7, refs["F_ACT_INTENT"])  # v6 = Decline PendingIntent
+    a.if_eqz(6, "v_ret")
+
+    # Common incoming call path (v6 = Decline PendingIntent, v5 = Notification.extras or null)
+    a.label("post_have_decline")
+    a.const_string(0, refs["STR_KEY_REJECT"])
+    a.invoke_virtual([12, 0, 6], refs["M_MAP_PUT"])
+
+    # Dedupe reposted ringing updates for the same VoIP package
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0], refs["M_MAP_GET"])
+    a.move_result_object(1)
+    a.if_eqz(1, "post_start_ring")
+    a.invoke_virtual([10, 1], refs["M_STR_EQ"])
+    a.move_result(0)
+    a.if_nez(0, "post_consume")
+
+    a.label("post_start_ring")
+    a.const_string(0, refs["STR_KEY_INCOMING"])
+    a.invoke_virtual([12, 0, 10], refs["M_MAP_PUT"])
+
+    # Extract real caller display name:
+    #   1) extras["android.title"]
+    #   2) CallStyle extras["android.callPerson"].getName() (reflection inside try/catch)
+    #   3) fallback to package name (v10)
+    a.const_string(4, refs["STR_EMPTY"])
+    a.if_eqz(5, "title_fb")
+    a.const_string(1, refs["STR_ANDROID_TITLE"])
+    a.invoke_virtual([5, 1], refs["M_BUNDLE_GET_CS"])
+    a.move_result_object(0)
+    a.if_eqz(0, "title_try_person")
+    a.invoke_virtual([0], refs["M_OBJ_TOSTR"])
+    a.move_result_object(4)
+    a.if_eqz(4, "title_try_person")
+    a.invoke_virtual([4], refs["M_STR_LEN"])
+    a.move_result(0)
+    a.if_gtz(0, "title_ok")
+
+    a.label("title_try_person")
+    emit_str(1, 0, len(KEY_PERSON), "data_person")
+    a.invoke_virtual([5, 1], refs["M_BASE_CONTAINS_KEY"])
+    a.move_result(0)
+    a.if_eqz(0, "title_fb")
+    a.label("try_per_start")
+    a.invoke_virtual([5, 1], refs["M_BUNDLE_GET_PARCELABLE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "title_fb")
+    a.invoke_virtual([0], refs["M_OBJ_GET_CLASS"])
+    a.move_result_object(1)
+    a.const_string(2, refs["STR_GET_NAME"])
+    a.filled_new_array([], refs["T_CLASS_ARR"])
+    a.move_result_object(3)
+    a.invoke_virtual([1, 2, 3], refs["M_CLS_GET_METHOD"])
+    a.move_result_object(1)
+    a.filled_new_array([], refs["T_OBJ_ARR"])
+    a.move_result_object(3)
+    a.invoke_virtual([1, 0, 3], refs["M_METH_INVOKE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "title_fb")
+    a.invoke_virtual([0], refs["M_OBJ_TOSTR"])
+    a.label("try_per_end")
+    a.move_result_object(0)
+    a.if_eqz(0, "title_fb")
+    a.invoke_virtual([0], refs["M_STR_LEN"])
+    a.move_result(1)
+    a.if_lez(1, "title_fb")
+    a.move_object(4, 0)
+    a.goto16("title_ok")
+
+    a.label("catch_per")
+    a.move_exception(0)
+
+    a.label("title_fb")
+    a.move_object(4, 10)
+
+    a.label("title_ok")
+    a.const_class(0, refs["T_Z7D"])
+    a.invoke_static([0], refs["M_Z7I_C"])
+    a.move_result_object(0)
+    a.if_eqz(0, "post_consume")
+    a.check_cast(0, refs["T_Z7D"])
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(1)
+    a.const4(3, 1)  # isIncoming = true -> sendCallContactName(title, maxLen)
+    a.const_string(5, refs["STR_EMPTY"])
+    a.invoke_interface_range(0, 6, refs["M_Z7D_C"])
+
+    a.label("post_consume")
+    a.const4(0, 0)
+    a.const4(1, 0)
+    a.aput_object(1, 13, 0)  # arr[0] = null -> suppress regular message banner
+
+    a.label("v_ret")
+    a.return_void()
+
+    # 4-byte aligned fill-array-data payloads (unreachable after return-void)
+    a.array_data_bytes("data_decline", KEY_DECLINE)
+    a.array_data_bytes("data_hangup", KEY_HANGUP)
+    a.array_data_bytes("data_person", KEY_PERSON)
+
+    insns = a.assemble(pad_to_words=insns_words)
+    lbl = a.last_labels
+    tries = [
+        (lbl["try_pi_start"], lbl["try_pi_end"] - lbl["try_pi_start"], lbl["catch_pi"]),
+        (lbl["try_dec_start"], lbl["try_dec_end"] - lbl["try_dec_start"], lbl["catch_dec"]),
+        (lbl["try_per_start"], lbl["try_per_end"] - lbl["try_per_start"], lbl["catch_per"]),
+    ]
+    assert tries[0][0] < tries[1][0] < tries[2][0]
+    assert all(cnt > 0 for _, cnt, _ in tries)
+    return insns, tries
+
+
+def patch_classes6_voip_calls(dex_bytes: bytes) -> bytes:
+    """
+    Patch classes6.dex with VoIP incoming call alerts & wrist reject for Watch 4S:
+      1) CommonUtil.checkAllNotNull([Object;)V <-> OtaCmdHandler.parseDataToCmd (812w -> 792w + 3 try/catches)
+      2) MsgNotifyService.onNotificationPosted in-place (+0006..+0022, outside try block)
+      3) MsgNotifyService.onNotificationRemoved <-> Route.copy$default (187w)
+      4) IDataHelper.g()V (REJECT_INCOMING) <-> WeatherInfo.copy$default (193w)
+      5) AppApplication$b.a/.c (onCallMissedOrRejected / onCallAnswered) <->
+         UploadSleepDetailsBean.copy$default (181w) & DialDetail.copy$default (179w)
+    """
+    print("[*] Patching classes6.dex (VoIP Incoming Call Alerts + Wrist Reject)...")
+    d6 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    refs = {
+        "T_SBN": d6.find_idx("type", "Landroid/service/notification/StatusBarNotification;"),
+        "T_PENDING_INTENT": d6.find_idx("type", "Landroid/app/PendingIntent;"),
+        "T_OBJ_ARR": d6.find_idx("type", "[Ljava/lang/Object;"),
+        "T_CLASS_ARR": d6.find_idx("type", "[Ljava/lang/Class;"),
+        "T_BYTE_ARR": d6.find_idx("type", "[B"),
+        "T_STRING": d6.find_idx("type", "Ljava/lang/String;"),
+        "T_Z7D": d6.find_idx("type", "Lz7/d;"),
+        "F_Z7I_A": d6.find_idx("field", "Lz7/i;->a:Ljava/util/HashMap;"),
+        "F_NOTIF_FLAGS": d6.find_idx("field", "Landroid/app/Notification;->flags:I"),
+        "F_NOTIF_ACTIONS": d6.find_idx("field", "Landroid/app/Notification;->actions:[Landroid/app/Notification$Action;"),
+        "F_NOTIF_EXTRAS": d6.find_idx("field", "Landroid/app/Notification;->extras:Landroid/os/Bundle;"),
+        "F_ACT_INTENT": d6.find_idx("field", "Landroid/app/Notification$Action;->actionIntent:Landroid/app/PendingIntent;"),
+        "M_VOIP_HELPER": d6.find_idx("method", "Lcom/jieli/jl_bt_ota/util/CommonUtil;->checkAllNotNull([Ljava/lang/Object;)V"),
+        "M_SBN_PKG": d6.find_idx("method", "Landroid/service/notification/StatusBarNotification;->getPackageName()Ljava/lang/String;"),
+        "M_SBN_NOTIF": d6.find_idx("method", "Landroid/service/notification/StatusBarNotification;->getNotification()Landroid/app/Notification;"),
+        "M_ACT_REMOTE": d6.find_idx("method", "Landroid/app/Notification$Action;->getRemoteInputs()[Landroid/app/RemoteInput;"),
+        "M_PI_SEND": d6.find_idx("method", "Landroid/app/PendingIntent;->send(Landroid/content/Context;ILandroid/content/Intent;)V"),
+        "M_BUNDLE_GET_CS": d6.find_idx("method", "Landroid/os/Bundle;->getCharSequence(Ljava/lang/String;)Ljava/lang/CharSequence;"),
+        "M_BUNDLE_GET_PARCELABLE": d6.find_idx("method", "Landroid/os/Bundle;->getParcelable(Ljava/lang/String;)Landroid/os/Parcelable;"),
+        "M_BASE_CONTAINS_KEY": d6.find_idx("method", "Landroid/os/BaseBundle;->containsKey(Ljava/lang/String;)Z"),
+        "M_STR_INIT_BYTES": d6.find_idx("method", "Ljava/lang/String;-><init>([B)V"),
+        "M_OBJ_GET_CLASS": d6.find_idx("method", "Ljava/lang/Object;->getClass()Ljava/lang/Class;"),
+        "M_CLS_GET_METHOD": d6.find_idx("method", "Ljava/lang/Class;->getMethod(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;"),
+        "M_METH_INVOKE": d6.find_idx("method", "Ljava/lang/reflect/Method;->invoke(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"),
+        "M_OBJ_TOSTR": d6.find_idx("method", "Ljava/lang/Object;->toString()Ljava/lang/String;"),
+        "M_STR_LEN": d6.find_idx("method", "Ljava/lang/String;->length()I"),
+        "M_STR_EQ": d6.find_idx("method", "Ljava/lang/String;->equals(Ljava/lang/Object;)Z"),
+        "M_MAP_GET": d6.find_idx("method", "Ljava/util/HashMap;->get(Ljava/lang/Object;)Ljava/lang/Object;"),
+        "M_MAP_PUT": d6.find_idx("method", "Ljava/util/HashMap;->put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"),
+        "M_MAP_REMOVE": d6.find_idx("method", "Ljava/util/HashMap;->remove(Ljava/lang/Object;)Ljava/lang/Object;"),
+        "M_Z7I_C": d6.find_idx("method", "Lz7/i;->c(Ljava/lang/Class;)Ljava/lang/Object;"),
+        "M_Z7D_C": d6.find_idx("method", "Lz7/d;->c(JZLjava/lang/String;Ljava/lang/String;)V"),
+        "M_HYAPP_CTX": d6.find_idx("method", "Lcom/liesheng/haylou/app/HyApplication;->getContext()Lcom/liesheng/haylou/app/HyApplication;"),
+        "M_HANGUP_END": d6.find_idx("method", "Lcom/yingsheng/protocol/util/HangUpTelephonyUtil;->endCall(Landroid/content/Context;)Z"),
+        "M_SYS_TIME": d6.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J"),
+        "STR_PKG_WA": d6.find_idx("string", "com.whatsapp"),
+        "STR_PKG_WAB": d6.find_idx("string", "com.whatsapp.w4b"),
+        "STR_PKG_ORCA": d6.find_idx("string", "com.facebook.orca"),
+        "STR_PKG_IG": d6.find_idx("string", "com.instagram.android"),
+        "STR_PKG_TG": d6.find_idx("string", "org.telegram.messenger"),
+        "STR_PKG_VIBER": d6.find_idx("string", "com.viber.voip"),
+        "STR_PKG_DISCORD": d6.find_idx("string", "com.discord"),
+        "STR_ANDROID_TITLE": d6.find_idx("string", "android.title"),
+        "STR_GET_NAME": d6.find_idx("string", "getName"),
+        "STR_KEY_INCOMING": d6.find_idx("string", "INCOMING_CALL"),
+        "STR_KEY_REJECT": d6.find_idx("string", "CALL_REJECT"),
+        "STR_EMPTY": d6.find_idx("string", ""),
+    }
+
+    # 1) CommonUtil.checkAllNotNull([Ljava/lang/Object;)V (len=3) <-> OtaCmdHandler.parseDataToCmd (len=3, 812w)
+    m_voip = d6.find_method_info(
+        "Lcom/jieli/jl_bt_ota/util/CommonUtil;",
+        "Lcom/jieli/jl_bt_ota/util/CommonUtil;->checkAllNotNull([Ljava/lang/Object;)V",
+        allow_tries=True,
+    )
+    m_host_ota = d6.find_method_info(
+        "Lcom/jieli/jl_rcsp/model/cmdHandler/OtaCmdHandler;",
+        "Lcom/jieli/jl_rcsp/model/cmdHandler/OtaCmdHandler;->parseDataToCmd(Landroid/bluetooth/BluetoothDevice;Lcom/jieli/jl_rcsp/model/base/BasePacket;)Lcom/jieli/jl_rcsp/model/base/CommandBase;",
+    )
+    slot_bytes = 812 * 2  # Original OtaCmdHandler.parseDataToCmd body size (4-byte aligned code_item boundary)
+    raw_insns, tries = _build_voip_call_helper_insns(refs, insns_words=None)
+    handlers_buf = bytearray(_encode_uleb128(len(tries)))
+    tries_buf = bytearray()
+    for t_start, t_len, catch_pc in tries:
+        h_off = len(handlers_buf)
+        handlers_buf += b"\x00" + _encode_uleb128(catch_pc)
+        tries_buf += struct.pack("<IHH", t_start, t_len, h_off)
+    try_blob = bytes(tries_buf + handlers_buf)
+    # Pick even helper_words so align4(16 + helper_words*2 + len(try_blob)) == 16 + slot_bytes EXACTLY,
+    # keeping DEX sequential TYPE_CODE_ITEM iteration aligned with the very next code_item!
+    helper_words = 2 * ((slot_bytes - len(try_blob)) // 4)
+    assert len(raw_insns) <= helper_words * 2
+    insns_voip = raw_insns + b"\x00" * (helper_words * 2 - len(raw_insns))
+    assert ((len(insns_voip) + len(try_blob) + 3) & ~3) == slot_bytes
+
+    if m_voip["insns_size"] >= 500:
+        target_off = m_voip["code_off"]
+        struct.pack_into("<4H2I", buf, target_off, 14, 1, 6, len(tries), 0, helper_words)
+        buf[target_off + 16 : target_off + 16 + len(insns_voip)] = insns_voip
+        buf[target_off + 16 + len(insns_voip) : target_off + 16 + len(insns_voip) + len(try_blob)] = try_blob
+        rem = slot_bytes - len(insns_voip) - len(try_blob)
+        buf[target_off + 16 + len(insns_voip) + len(try_blob) : target_off + 16 + slot_bytes] = b"\x00" * rem
+    else:
+        assert m_voip["code_pos_len"] == 3 and m_host_ota["code_pos_len"] == 3
+        assert m_host_ota["insns_size"] * 2 == slot_bytes
+        target_off = m_host_ota["code_off"]
+        struct.pack_into("<4H2I", buf, target_off, 14, 1, 6, len(tries), 0, helper_words)
+        buf[target_off + 16 : target_off + 16 + len(insns_voip)] = insns_voip
+        buf[target_off + 16 + len(insns_voip) : target_off + 16 + len(insns_voip) + len(try_blob)] = try_blob
+        rem = slot_bytes - len(insns_voip) - len(try_blob)
+        buf[target_off + 16 + len(insns_voip) + len(try_blob) : target_off + 16 + slot_bytes] = b"\x00" * rem
+
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_voip["insns_size"])
+        struct.pack_into(
+            "<4H2I", buf, m_voip["code_off"],
+            m_host_ota["ins_size"] + 1, m_host_ota["ins_size"], 0, 0, 0, m_voip["insns_size"],
+        )
+        buf[m_voip["code_off"] + 16 : m_voip["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        enc_host = _encode_uleb128(m_host_ota["code_off"])
+        enc_voip = _encode_uleb128(m_voip["code_off"])
+        assert len(enc_host) == 3 and len(enc_voip) == 3
+        buf[m_voip["code_pos"] : m_voip["code_pos"] + 3] = enc_host
+        buf[m_host_ota["code_pos"] : m_host_ota["code_pos"] + 3] = enc_voip
+
+    # 2) MsgNotifyService.onNotificationPosted(StatusBarNotification)V in-place (+0006..+0022, outside try[0])
+    m_posted = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/MsgNotifyService;",
+        "Lcom/liesheng/haylou/service/MsgNotifyService;->onNotificationPosted(Landroid/service/notification/StatusBarNotification;)V",
+        allow_tries=True,
+    )
+    p_insns = m_posted["code_off"] + 16
+    p_hook = DalvikAssembler()
+    p_hook.filled_new_array([8, 8], refs["T_OBJ_ARR"])
+    p_hook.move_result_object(1)
+    p_hook.invoke_static([1], refs["M_VOIP_HELPER"])
+    p_hook.const4(2, 0)
+    p_hook.aget_object(2, 1, 2)
+    p_hook.if_nez(2, "posted_cont")
+    p_hook.return_void()
+    for _ in range((0x23 - 0x06) - 13):
+        p_hook.nop()
+    p_hook.label("posted_cont")
+    p_hook_bytes = p_hook.assemble()
+    assert len(p_hook_bytes) == (0x23 - 0x06) * 2
+    if bytes(buf[p_insns + 0x06 * 2 : p_insns + 0x23 * 2]) != p_hook_bytes:
+        assert buf[p_insns + 0x06 * 2] == 0x55, "Unexpected bytecode at onNotificationPosted+0006"
+        buf[p_insns + 0x06 * 2 : p_insns + 0x23 * 2] = p_hook_bytes
+
+    def _prepend_and_swap(m_target, m_host, pre_bytes, swapped_min_words=150):
+        if m_target["insns_size"] >= swapped_min_words:
+            return
+        assert m_target["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
+        orig_bytes = dex_bytes[m_target["code_off"] + 16 : m_target["code_off"] + 16 + m_target["insns_size"] * 2]
+        combined = pre_bytes + orig_bytes
+        pad_w = m_host["insns_size"] - len(combined) // 2
+        assert pad_w >= 0
+        struct.pack_into(
+            "<4H2I", buf, m_host["code_off"],
+            m_target["regs_size"], m_target["ins_size"], max(m_target["outs_size"], 2), 0, 0, m_host["insns_size"],
+        )
+        buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + m_host["insns_size"] * 2] = combined + b"\x00\x00" * pad_w
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_target["insns_size"])
+        struct.pack_into(
+            "<4H2I", buf, m_target["code_off"],
+            m_host["ins_size"] + 1, m_host["ins_size"], 0, 0, 0, m_target["insns_size"],
+        )
+        buf[m_target["code_off"] + 16 : m_target["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_target["code_pos"] : m_target["code_pos"] + 4] = encode_uleb128_4bytes(m_host["code_off"])
+        buf[m_host["code_pos"] : m_host["code_pos"] + 4] = encode_uleb128_4bytes(m_target["code_off"])
+
+    # 3) MsgNotifyService.onNotificationRemoved <-> Route.copy$default (187w)
+    m_rem = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/MsgNotifyService;",
+        "Lcom/liesheng/haylou/service/MsgNotifyService;->onNotificationRemoved(Landroid/service/notification/StatusBarNotification;)V",
+    )
+    m_host_route = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/routes/Route;",
+        "Lcom/liesheng/hayloufun/sport/routes/Route;->copy$default(Lcom/liesheng/hayloufun/sport/routes/Route;Ljava/lang/String;DDDLcom/liesheng/hayloufun/sport/routes/Point;Lcom/liesheng/hayloufun/sport/routes/Point;Lcom/liesheng/hayloufun/sport/routes/Point;ZLjava/util/List;DLjava/lang/String;JJJZILjava/lang/Object;)Lcom/liesheng/hayloufun/sport/routes/Route;",
+    )
+    rem_pre = DalvikAssembler()
+    rem_pre.if_eqz(2, "rem_orig")
+    rem_pre.filled_new_array([2], refs["T_OBJ_ARR"])
+    rem_pre.move_result_object(0)
+    rem_pre.invoke_static([0], refs["M_VOIP_HELPER"])
+    rem_pre.label("rem_orig")
+    _prepend_and_swap(m_rem, m_host_route, rem_pre.assemble())
+
+    # 4) IDataHelper.g()V (REJECT_INCOMING) <-> WeatherInfo.copy$default (193w)
+    m_idh_g = d6.find_method_info(
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;",
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->g()V",
+    )
+    m_host_weather = d6.find_method_info(
+        "Lcom/liesheng/lib_common/bean/WeatherInfo;",
+        "Lcom/liesheng/lib_common/bean/WeatherInfo;->copy$default(Lcom/liesheng/lib_common/bean/WeatherInfo;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/liesheng/lib_common/bean/WeatherInfo;",
+    )
+    def _build_idh_g(pad_w):
+        g = DalvikAssembler()
+        g.const4(0, 0)
+        g.filled_new_array([0], refs["T_OBJ_ARR"])
+        g.move_result_object(1)
+        g.invoke_static([1], refs["M_VOIP_HELPER"])
+        g.aget_object(0, 1, 0)
+        g.if_nez(0, "g_done")
+        g.invoke_static([], refs["M_HYAPP_CTX"])
+        g.move_result_object(0)
+        g.invoke_static([0], refs["M_HANGUP_END"])
+        g.label("g_done")
+        g.return_void()
+        return g.assemble(pad_to_words=pad_w)
+
+    if m_idh_g["insns_size"] >= 150:
+        g_bytes = _build_idh_g(m_idh_g["insns_size"])
+        struct.pack_into("<4H2I", buf, m_idh_g["code_off"], 3, 1, 1, 0, 0, m_idh_g["insns_size"])
+        buf[m_idh_g["code_off"] + 16 : m_idh_g["code_off"] + 16 + len(g_bytes)] = g_bytes
+    else:
+        assert m_idh_g["code_pos_len"] == 4 and m_host_weather["code_pos_len"] == 4
+        g_bytes = _build_idh_g(m_host_weather["insns_size"])
+        struct.pack_into("<4H2I", buf, m_host_weather["code_off"], 3, 1, 1, 0, 0, m_host_weather["insns_size"])
+        buf[m_host_weather["code_off"] + 16 : m_host_weather["code_off"] + 16 + len(g_bytes)] = g_bytes
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_idh_g["insns_size"])
+        struct.pack_into(
+            "<4H2I", buf, m_idh_g["code_off"],
+            m_host_weather["ins_size"] + 1, m_host_weather["ins_size"], 0, 0, 0, m_idh_g["insns_size"],
+        )
+        buf[m_idh_g["code_off"] + 16 : m_idh_g["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_idh_g["code_pos"] : m_idh_g["code_pos"] + 4] = encode_uleb128_4bytes(m_host_weather["code_off"])
+        buf[m_host_weather["code_pos"] : m_host_weather["code_pos"] + 4] = encode_uleb128_4bytes(m_idh_g["code_off"])
+
+    # 5) AppApplication$b.a (onCallMissedOrRejected) & .c (onCallAnswered) -> dismiss VoIP watch ringing
+    clr_pre = DalvikAssembler()
+    clr_pre.filled_new_array([], refs["T_OBJ_ARR"])
+    clr_pre.move_result_object(0)
+    clr_pre.invoke_static([0], refs["M_VOIP_HELPER"])
+    clr_pre_bytes = clr_pre.assemble()
+
+    m_app_a = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/app/AppApplication$b;",
+        "Lcom/liesheng/hayloufun/app/AppApplication$b;->a(Landroid/content/Context;Ljava/lang/String;)V",
+    )
+    m_host_us = d6.find_method_info(
+        "Lcom/liesheng/module_home/bean/UploadSleepDetailsBean;",
+        "Lcom/liesheng/module_home/bean/UploadSleepDetailsBean;->copy$default(Lcom/liesheng/module_home/bean/UploadSleepDetailsBean;JLjava/lang/String;JJLjava/util/List;IIIIIIIIILjava/util/List;ILjava/lang/Object;)Lcom/liesheng/module_home/bean/UploadSleepDetailsBean;",
+    )
+    _prepend_and_swap(m_app_a, m_host_us, clr_pre_bytes)
+
+    m_app_c = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/app/AppApplication$b;",
+        "Lcom/liesheng/hayloufun/app/AppApplication$b;->c(Ljava/lang/String;)V",
+    )
+    m_host_dd = d6.find_method_info(
+        "Lcom/liesheng/module_device/entity/DialDetail;",
+        "Lcom/liesheng/module_device/entity/DialDetail;->copy$default(Lcom/liesheng/module_device/entity/DialDetail;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JILjava/lang/String;Ljava/lang/Integer;Lcom/liesheng/lib_room/table/OtherConfig;ZLandroid/graphics/Bitmap;IILjava/lang/Object;)Lcom/liesheng/module_device/entity/DialDetail;",
+    )
+    _prepend_and_swap(m_app_c, m_host_dd, clr_pre_bytes)
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes6.dex VoIP Calls patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 4. classes7.dex — WatchConfig Unlocks + 3-Card Resting Heart Rate UI
 # --------------------------------------------------------------------------- #
 
 def patch_classes7_unlock_cards(dex_bytes: bytes) -> bytes:
-    print("[*] Patching classes7.dex (WatchConfig feature unlocks: PAI, VO2 Max, HRV, Quick Reply)...")
+    print("[*] Patching classes7.dex (WatchConfig feature unlocks: PAI, VO2 Max, HRV)...")
     d7 = DexFile(dex_bytes)
     buf = bytearray(dex_bytes)
     patched_pattern = bytes([0x12, 0x10, 0x0F, 0x00, 0x00, 0x00])  # const/4 v0, 1; return v0; nop
@@ -2679,8 +3322,22 @@ def patch_classes7_unlock_cards(dex_bytes: bytes) -> bytes:
         unlocked += 1
         print(f"    [+] Unlocked {label}")
 
+    restored = 0
+    for label, desc, fdesc in WATCHCONFIG_RESTORE_STOCK:
+        info = d7.find_method_info("Lcom/yingsheng/protocol/config/WatchConfig;", desc)
+        fidx = d7.find_idx("field", fdesc)
+        stock_pattern = struct.pack("<HHH", 0x1055, fidx, 0x000F)  # iget-boolean v0, v1, field; return v0
+        insns_off = info["code_off"] + 16
+        cur = bytes(buf[insns_off : insns_off + 6])
+        if cur == stock_pattern:
+            continue
+        assert cur == patched_pattern, f"Unexpected bytes for {label}: {cur.hex()}"
+        buf[insns_off : insns_off + 6] = stock_pattern
+        restored += 1
+        print(f"    [+] Restored {label} to stock WatchConfig field (unsupported in Watch 4S firmware)")
+
     out = recompute_dex_checksums(buf)
-    print(f"[+] classes7.dex WatchConfig unlocks complete ({unlocked} newly applied)")
+    print(f"[+] classes7.dex WatchConfig unlocks complete ({unlocked} unlocked, {restored} restored to stock)")
     return out
 
 
@@ -3074,6 +3731,7 @@ def build_modded_apk(
     night_raise_to_wake: bool = True,
     night_hours: tuple[tuple[int, int], tuple[int, int]] = ((23, 0), (7, 0)),
     cycling_fixes: bool = True,
+    voip_calls: bool = True,
 ) -> str:
     if not os.path.isfile(src_apk):
         print(f"[-] Source APK not found: {src_apk}")
@@ -3094,7 +3752,7 @@ def build_modded_apk(
                 c3 = patch_classes3_night_quickview(c3)
             replacements["classes3.dex"] = c3
 
-        if noclock or vitality_vo2 or night_raise_to_wake or cycling_fixes:
+        if noclock or vitality_vo2 or night_raise_to_wake or cycling_fixes or voip_calls:
             c6 = zf.read("classes6.dex")
             if noclock:
                 c6 = patch_classes6_sideload(c6, mode=mode)
@@ -3104,6 +3762,8 @@ def build_modded_apk(
                 c6 = patch_classes6_night_quickview(c6, night_start=night_hours[0], night_end=night_hours[1])
             if cycling_fixes:
                 c6 = patch_classes6_cycling_fixes(c6)
+            if voip_calls:
+                c6 = patch_classes6_voip_calls(c6)
             replacements["classes6.dex"] = c6
 
         if unlock_cards or rhr or night_raise_to_wake:
@@ -3143,7 +3803,7 @@ def main():
 
     parser.add_argument("--all", action="store_true", help="Apply all patches (default when no specific patch flag is passed)")
     parser.add_argument("--noclock", action="store_true", help="Watchface 0xB0 no-clock + FB hash bypass + ls25plate.bin sideload")
-    parser.add_argument("--unlock-cards", action="store_true", help="Unlock hidden WatchConfig features (PAI, VO2 Max, HRV, Quick Reply)")
+    parser.add_argument("--unlock-cards", action="store_true", help="Unlock hidden WatchConfig features (PAI, VO2 Max, HRV)")
     parser.add_argument("--rhr", action="store_true", help="Add 3rd Resting Heart Rate card to Heart Rate Details")
     parser.add_argument("--vitality-vo2", action="store_true", help="Add computed Vitality Score (PAI) + VO2 Max engines")
     parser.add_argument(
@@ -3162,6 +3822,11 @@ def main():
         action="store_true",
         help="Cycling phantom-step removal + post-sync GPS moving time/avg speed + live GPS auto-pause/resume",
     )
+    parser.add_argument(
+        "--voip-calls",
+        action="store_true",
+        help="VoIP incoming call alerts + wrist reject (WhatsApp, Messenger, Instagram, Telegram, Viber, Discord)",
+    )
     parser.add_argument("--verify-only", metavar="APK", help="Only verify v2/v3 signatures of an existing APK")
     args = parser.parse_args()
 
@@ -3172,7 +3837,7 @@ def main():
 
     any_specific = (
         args.noclock or args.unlock_cards or args.rhr
-        or args.vitality_vo2 or args.night_raise_to_wake or args.cycling_fixes
+        or args.vitality_vo2 or args.night_raise_to_wake or args.cycling_fixes or args.voip_calls
     )
     use_all = args.all or not any_specific
     do_noclock = use_all or args.noclock
@@ -3181,9 +3846,10 @@ def main():
     do_pai_vo2 = use_all or args.vitality_vo2
     do_night_qv = use_all or args.night_raise_to_wake
     do_cycling = use_all or args.cycling_fixes
+    do_voip = use_all or args.voip_calls
 
     out_path = args.out or (
-        DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv or do_cycling) else DEFAULT_OUT_NOCLOCK
+        DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv or do_cycling or do_voip) else DEFAULT_OUT_NOCLOCK
     )
 
     build_modded_apk(
@@ -3199,6 +3865,7 @@ def main():
         night_raise_to_wake=do_night_qv,
         night_hours=args.night_hours,
         cycling_fixes=do_cycling,
+        voip_calls=do_voip,
     )
 
 

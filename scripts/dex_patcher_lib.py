@@ -221,6 +221,10 @@ class DalvikAssembler:
         assert 0 <= dst < 256
         self.items.append(("words", [0x0C | (dst << 8)]))
 
+    def move_exception(self, dst: int):
+        assert 0 <= dst < 256
+        self.items.append(("words", [0x0D | (dst << 8)]))
+
     def return_void(self):
         self.items.append(("words", [0x0E]))
 
@@ -262,6 +266,10 @@ class DalvikAssembler:
         assert 0 <= dst < 256 and 0 <= str_idx < 65536
         self.items.append(("words", [0x1A | (dst << 8), str_idx]))
 
+    def const_class(self, dst: int, type_idx: int):
+        assert 0 <= dst < 256 and 0 <= type_idx < 65536
+        self.items.append(("words", [0x1C | (dst << 8), type_idx]))
+
     def check_cast(self, reg: int, type_idx: int):
         assert 0 <= reg < 256 and 0 <= type_idx < 65536
         self.items.append(("words", [0x1F | (reg << 8), type_idx]))
@@ -289,6 +297,13 @@ class DalvikAssembler:
         w2 = r[0] | (r[1] << 4) | (r[2] << 8) | (r[3] << 12)
         self.items.append(("words", [w0, type_idx, w2]))
 
+    def fill_array_data(self, reg: int, target: str):
+        assert 0 <= reg < 256
+        self.items.append(("branch31t", 0x26, reg, target))
+
+    def array_data_bytes(self, label_name: str, raw: bytes):
+        self.items.append(("array_data", label_name, bytes(raw)))
+
     def aget(self, dst: int, arr: int, idx: int):
         assert all(0 <= x < 256 for x in (dst, arr, idx))
         self.items.append(("words", [0x44 | (dst << 8), arr | (idx << 8)]))
@@ -304,6 +319,10 @@ class DalvikAssembler:
     def aput_object(self, src: int, arr: int, idx: int):
         assert all(0 <= x < 256 for x in (src, arr, idx))
         self.items.append(("words", [0x4D | (src << 8), arr | (idx << 8)]))
+
+    def iget(self, dst: int, obj: int, field_idx: int):
+        assert 0 <= dst < 16 and 0 <= obj < 16 and 0 <= field_idx < 65536
+        self.items.append(("words", [0x52 | ((dst | (obj << 4)) << 8), field_idx]))
 
     def iget_object(self, dst: int, obj: int, field_idx: int):
         assert 0 <= dst < 16 and 0 <= obj < 16 and 0 <= field_idx < 65536
@@ -586,9 +605,19 @@ class DalvikAssembler:
                 pc += len(item[1])
             elif kind in ("branch20t", "branch21t", "branch22t"):
                 pc += 2
+            elif kind == "branch31t":
+                pc += 3
+            elif kind == "array_data":
+                _, name, raw = item
+                if pc % 2 != 0:
+                    pc += 1
+                assert name not in labels, f"Duplicate label {name}"
+                labels[name] = pc
+                pc += 4 + (len(raw) + 1) // 2
             else:
                 raise ValueError(kind)
 
+        self.last_labels = labels
         out_words = []
         pc = 0
         for item in self.items:
@@ -616,6 +645,25 @@ class DalvikAssembler:
                 assert -32768 <= rel <= 32767
                 out_words.extend([op | ((ra | (rb << 4)) << 8), rel & 0xFFFF])
                 pc += 2
+            elif kind == "branch31t":
+                _, op, reg, target = item
+                tpc = labels[target]
+                assert tpc % 2 == 0, f"Unaligned payload label {target} at +{tpc:x}"
+                rel = (tpc - pc) & 0xFFFFFFFF
+                out_words.extend([op | (reg << 8), rel & 0xFFFF, (rel >> 16) & 0xFFFF])
+                pc += 3
+            elif kind == "array_data":
+                _, name, raw = item
+                if pc % 2 != 0:
+                    out_words.append(0x0000)
+                    pc += 1
+                assert pc == labels[name]
+                n = len(raw)
+                padded = raw + (b"\x00" if (n % 2) else b"")
+                out_words.extend([0x0300, 1, n & 0xFFFF, (n >> 16) & 0xFFFF])
+                for i in range(0, len(padded), 2):
+                    out_words.append(padded[i] | (padded[i + 1] << 8))
+                pc += 4 + len(padded) // 2
 
         if pad_to_words is not None:
             assert len(out_words) <= pad_to_words, f"Code {len(out_words)} words > budget {pad_to_words} words"
