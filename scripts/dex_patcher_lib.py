@@ -154,7 +154,8 @@ class DexFile:
                 m_idx = 0
                 for _ in range(count):
                     diff, off = self.read_uleb128(off)
-                    _acc, off = self.read_uleb128(off)
+                    acc_pos = off
+                    acc_val, off = self.read_uleb128(off)
                     code_pos = off
                     code_off, off = self.read_uleb128(off)
                     m_idx += diff
@@ -164,6 +165,8 @@ class DexFile:
                             assert tries_s == 0 and dbg_off == 0, f"Unexpected tries={tries_s} dbg={dbg_off} on {target_desc}"
                         return {
                             "method_idx": m_idx,
+                            "acc_pos": acc_pos,
+                            "access_flags": acc_val,
                             "code_pos": code_pos,
                             "code_pos_len": off - code_pos,
                             "code_off": code_off,
@@ -314,9 +317,112 @@ class DalvikAssembler:
         assert 0 <= dst < 256 and 0 <= field_idx < 65536
         self.items.append(("words", [0x62 | (dst << 8), field_idx]))
 
+    def sget_boolean(self, dst: int, field_idx: int):
+        assert 0 <= dst < 256 and 0 <= field_idx < 65536
+        self.items.append(("words", [0x63 | (dst << 8), field_idx]))
+
+    def sput_wide(self, src: int, field_idx: int):
+        assert 0 <= src < 256 and 0 <= field_idx < 65536
+        self.items.append(("words", [0x68 | (src << 8), field_idx]))
+
+    def const_float(self, dst: int, val: float):
+        bits = struct.unpack("<I", struct.pack("<f", val))[0]
+        if (bits & 0xFFFF) == 0:
+            self.const_high16(dst, bits >> 16)
+        else:
+            self.const32(dst, bits)
+
+    def cmpl_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0x2D | (dst << 8), a | (b << 8)]))
+
+    def cmpg_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0x2E | (dst << 8), a | (b << 8)]))
+
+    def cmp_long(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0x31 | (dst << 8), a | (b << 8)]))
+
+    def int_to_long(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x81 | ((dst | (src << 4)) << 8)]))
+
+    def int_to_float(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x82 | ((dst | (src << 4)) << 8)]))
+
+    def long_to_int(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x84 | ((dst | (src << 4)) << 8)]))
+
+    def long_to_float(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x85 | ((dst | (src << 4)) << 8)]))
+
     def float_to_int(self, dst: int, src: int):
         assert 0 <= dst < 16 and 0 <= src < 16
         self.items.append(("words", [0x87 | ((dst | (src << 4)) << 8)]))
+
+    def float_to_double(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x89 | ((dst | (src << 4)) << 8)]))
+
+    def double_to_float(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0x8C | ((dst | (src << 4)) << 8)]))
+
+    def add_long(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0x9B | (dst << 8), a | (b << 8)]))
+
+    def sub_long(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0x9C | (dst << 8), a | (b << 8)]))
+
+    def add_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0xA6 | (dst << 8), a | (b << 8)]))
+
+    def sub_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0xA7 | (dst << 8), a | (b << 8)]))
+
+    def mul_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0xA8 | (dst << 8), a | (b << 8)]))
+
+    def div_float(self, dst: int, a: int, b: int):
+        assert all(0 <= x < 256 for x in (dst, a, b))
+        self.items.append(("words", [0xA9 | (dst << 8), a | (b << 8)]))
+
+    def sub_long_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xBC | ((dst | (src << 4)) << 8)]))
+
+    def mul_long_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xBD | ((dst | (src << 4)) << 8)]))
+
+    def div_long_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xBE | ((dst | (src << 4)) << 8)]))
+
+    def add_float_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xC6 | ((dst | (src << 4)) << 8)]))
+
+    def sub_float_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xC7 | ((dst | (src << 4)) << 8)]))
+
+    def mul_float_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xC8 | ((dst | (src << 4)) << 8)]))
+
+    def div_float_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xC9 | ((dst | (src << 4)) << 8)]))
 
     def add_int_2addr(self, dst: int, src: int):
         assert 0 <= dst < 16 and 0 <= src < 16

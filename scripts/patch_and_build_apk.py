@@ -19,6 +19,13 @@ Modular patch flags (default: --all):
                   and wire it exclusively to Watch 4S Raise-to-Wake schedule (BLE 0x72),
                   defaulting to 23:00-07:00 off (07:00-23:00 active) while keeping calls &
                   notifications active at night.
+  --cycling-fixes classes6.dex: Three cycling fixes for Watch 4S + Haylou Fun:
+                  1) Strip phantom handlebar-vibration steps during cycling windows
+                     (live BLE sync + real-time delta guard + 30-day backfill)
+                  2) Post-sync GPS moving time & avg speed cleanup for watch-started rides
+                     (excludes < 3.06 km/h stops while preserving ride distance & calories)
+                  3) Live GPS auto-pause & auto-resume for phone-started cycling
+                     (auto-pauses phone + watch at < 3.6 km/h for 5s, auto-resumes >= 5.4 km/h)
 """
 
 from __future__ import annotations
@@ -1433,6 +1440,1223 @@ def patch_classes6_night_quickview(
 
 
 # --------------------------------------------------------------------------- #
+# 3c. classes6.dex — Cycling Fixes (Phantom Steps + Moving Time + Auto-Pause)
+# --------------------------------------------------------------------------- #
+
+def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> bytes:
+    """
+    Build Lio/reactivex/internal/functions/ObjectHelper;->hashCode(Ljava/lang/Object;)I
+    (swapped into SportTable.copy$default, 649 words, regs=24, ins=1, outs=9, p0=v23).
+
+    Type-dispatched static helper:
+      - StepDataTable: strips phantom handlebar-vibration steps recorded during cycling
+        workouts — works seamlessly on BOTH daily-total watches (Haylou Watch 4S, where
+        CRPStepInfo leaves items[24] empty) AND hourly-bucket watches (updating items[h]
+        within cycling hours via a 24-bit hour mask). Uses exact SportTable.steps when
+        present, or ~1.5 steps/s (90 steps/min) of moving cycling duration when omitted,
+        and tracks stripped totals in unused Room column StepDataTable.baseSteps for
+        100% idempotency across backfills and live BLE step syncs.
+        Returns 1 if modified, 0 otherwise.
+      - android.location.Location: live GPS auto-pause / auto-resume controller for
+        phone-started cycling workouts in SportRunningManager.onLocationChange.
+        Returns 1 if onLocationChange should proceed normally, 0 if paused/auto-paused.
+    """
+    a = DalvikAssembler()
+
+    # Dispatch on p0 (v25 -> v15); regs=26 so handle_auto_pause can use v22,v23 for nowMs!
+    a.if_eqz(25, "ret_zero")
+    a.move_object(15, 25)
+    a.instance_of(1, 15, refs["T_STEP_TABLE"])
+    a.if_nez(1, "clean_step_table")
+    a.instance_of(1, 15, refs["T_LOCATION"])
+    a.if_nez(1, "handle_auto_pause")
+
+    a.label("ret_zero")
+    a.const4(0, 0)
+    a.return_int(0)
+
+    a.label("ret_one")
+    a.const4(0, 1)
+    a.return_int(0)
+
+    # ------------------------------------------------------------------ #
+    # Branch A: cleanStepTable(StepDataTable v15) -> 1 if modified else 0
+    # Regs: v15=step, v18,v19=localMidMs, v17=sports, v16=listSize,
+    #       v14=spIdx, v13=hasCycle, v12=curTotal, v11=totalSportSteps,
+    #       v10=totalCycleSec, v9=hourMask
+    # ------------------------------------------------------------------ #
+    a.label("clean_step_table")
+    a.check_cast(15, refs["T_STEP_TABLE"])
+
+    a.invoke_virtual([15], refs["M_STEP_GET_TOTAL"])
+    a.move_result(12)  # v12 = curTotal
+    a.if_lez(12, "ret_zero")
+
+    a.invoke_virtual([15], refs["M_STEP_GET_RECDATE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "ret_zero")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(0)
+    a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
+    a.move_result_wide(18)  # v18,v19 = localMidMs
+
+    a.sget_object(0, refs["F_APPDB_A"])
+    a.invoke_virtual([0], refs["M_APPDB_B"])
+    a.move_result_object(0)
+    a.invoke_virtual([0], refs["M_APPDB_SPORT_DAO"])
+    a.move_result_object(0)
+    a.move_wide(1, 18)
+    a.const_wide32(3, 86400000)
+    a.add_long_2addr(3, 1)
+    a.invoke_interface([0, 1, 2, 3, 4], refs["M_SPORT_BY_DATE"])
+    a.move_result_object(17)
+    a.if_eqz(17, "ret_zero")
+    a.move_object(0, 17)
+    a.invoke_interface([0], refs["M_LIST_SIZE"])
+    a.move_result(16)
+    a.if_lez(16, "ret_zero")
+
+    a.const4(14, 0)   # spIdx = 0
+    a.const4(13, 0)   # hasCycle = 0
+    a.const4(11, 0)   # totalSportSteps = 0
+    a.const4(10, 0)   # totalCycleSec = 0
+    a.const4(9, 0)    # hourMask = 0
+    a.const16(20, 0)  # totalCycleDistKm (float 0.0f)
+    a.const16(21, 0)  # totalCycleCal (int kcal)
+
+    a.label("cs_sp_loop")
+    a.move(1, 16)
+    a.if_ge(14, 1, "cs_sp_done")
+    a.move_object(0, 17)
+    a.invoke_interface([0, 14], refs["M_LIST_GET"])
+    a.move_result_object(8)
+    a.check_cast(8, refs["T_SPORT_TABLE"])
+
+    a.invoke_virtual([8], refs["M_SPORT_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "cs_sp_next")
+
+    a.const4(13, 1)  # hasCycle = 1
+    a.invoke_virtual([8], refs["M_SPORT_GET_DIST"])
+    a.move_result(0)
+    a.const4(1, 0)
+    a.cmpl_float(1, 0, 1)
+    a.if_lez(1, "cs_add_cal")
+    a.add_float(20, 20, 0)
+    a.label("cs_add_cal")
+    a.invoke_virtual([8], refs["M_SPORT_GET_CAL"])
+    a.move_result(0)
+    a.if_lez(0, "cs_add_steps")
+    a.move(1, 21)
+    a.add_int_2addr(1, 0)
+    a.move(21, 1)
+    a.label("cs_add_steps")
+    a.invoke_virtual([8], refs["M_SPORT_GET_STEPS"])
+    a.move_result(0)
+    a.if_lez(0, "cs_add_dur")
+    a.add_int_2addr(11, 0)
+    a.label("cs_add_dur")
+    a.invoke_virtual([8], refs["M_SPORT_GET_DUR"])
+    a.move_result(0)
+    a.if_lez(0, "cs_mark_hrs")
+    a.add_int_2addr(10, 0)
+
+    # Mark cycling hours [hStart..hEnd] in 24-bit hourMask (v9) for hourly-bucket watches
+    a.label("cs_mark_hrs")
+    a.invoke_virtual([8], refs["M_SPORT_START"])
+    a.move_result_object(0)
+    a.if_eqz(0, "cs_sp_next")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(0)
+    a.move_wide(2, 18)
+    a.sub_long_2addr(0, 2)
+    a.const_wide32(4, 3600000)
+    a.div_long_2addr(0, 4)
+    a.long_to_int(6, 0)  # v6 = hStart
+    a.if_gez(6, "cs_hs_ok")
+    a.const4(6, 0)
+    a.label("cs_hs_ok")
+
+    a.invoke_virtual([8], refs["M_SPORT_END"])
+    a.move_result_object(0)
+    a.if_eqz(0, "cs_sp_next")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(0)
+    a.sub_long_2addr(0, 2)
+    a.div_long_2addr(0, 4)
+    a.long_to_int(7, 0)  # v7 = hEnd
+    a.const16(0, 23)
+    a.if_le(7, 0, "cs_he_ok")
+    a.move(7, 0)
+    a.label("cs_he_ok")
+
+    a.label("cs_mask_loop")
+    a.if_gt(6, 7, "cs_sp_next")
+    a.const4(0, 1)
+    # bit = 1 << h: use loop-free shift via add? No, shl-int/2addr (0xB8) or just add_int_2addr?
+    # Keep 24-bit mask simple: set bit via shl_int_lit8? We can just set v9 = -1 or use shl!
+    # Wait: even simpler, add shl-int/2addr (0xB8) or use inline 1-word shl_int_2addr!
+    a.items.append(("words", [0xB8 | ((0 | (6 << 4)) << 8)]))  # shl-int/2addr v0, v6
+    a.or_int_2addr(9, 0)
+    a.add_int_lit8(6, 6, 1)
+    a.goto16("cs_mask_loop")
+
+    a.label("cs_sp_next")
+    a.add_int_lit8(14, 14, 1)
+    a.goto16("cs_sp_loop")
+
+    # Compute idempotent step deduction using StepDataTable.baseSteps
+    a.label("cs_sp_done")
+    a.if_eqz(13, "ret_zero")
+
+    a.invoke_virtual([15], refs["M_STEP_GET_BASE"])
+    a.move_result(3)       # v3 = alreadyBase
+    a.move(4, 12)
+    a.add_int_2addr(4, 3)  # v4 = rawTotal = curTotal + alreadyBase
+
+    # want (v5) = totalSportSteps (v11) if > 0, else totalCycleSec (v10) * 3 / 2 (~90 steps/min)
+    a.move(5, 11)
+    a.if_gtz(5, "cs_want_ok")
+    a.mul_int_lit8(5, 10, 3)
+    a.div_int_lit8(5, 5, 2)
+    a.label("cs_want_ok")
+    a.if_le(5, 4, "cs_wcap")
+    a.move(5, 4)
+    a.label("cs_wcap")
+
+    a.sub_int_2addr(5, 3)  # delta = want - alreadyBase
+    a.if_lez(5, "cs_chk_heal")
+    a.if_le(5, 12, "cs_dcap")
+    a.move(5, 12)
+    a.label("cs_dcap")
+
+    a.move(6, 12)
+    a.sub_int_2addr(6, 5)  # v6 = newTotal = curTotal - delta
+    a.add_int_2addr(3, 5)  # v3 = newBase = alreadyBase + delta
+
+    a.invoke_virtual([15, 6], refs["M_STEP_SET_TOTAL"])
+    a.invoke_virtual([15, 3], refs["M_STEP_SET_BASE"])
+
+    # Deduct ONLY walking-equivalent distance (0.00074 km/step) & kcal (0.04 kcal/step)
+    # of the removed phantom steps, floored at the day's cycling totals so bike km/kcal stay intact
+    a.int_to_float(3, 5)  # v3 = (float) delta
+
+    a.const_float(4, 0.00074)
+    a.mul_float_2addr(4, 3)  # v4 = delta * 0.00074 km
+    a.invoke_virtual([15], refs["M_STEP_GET_DIST"])
+    a.move_result(2)
+    a.sub_float_2addr(2, 4)  # newDist = curDist - distDeltaKm
+    a.move(0, 20)            # v0 = totalCycleDistKm
+    a.cmpl_float(1, 2, 0)
+    a.if_gez(1, "cs_dist_ok")
+    a.move(2, 0)
+    a.label("cs_dist_ok")
+    a.invoke_virtual([15, 2], refs["M_STEP_SET_DIST"])
+
+    a.const_float(4, 0.04)
+    a.mul_float_2addr(4, 3)  # v4 = delta * 0.04 kcal
+    a.invoke_virtual([15], refs["M_STEP_GET_KCAL"])
+    a.move_result(2)
+    a.sub_float_2addr(2, 4)  # newKcal = curKcal - kcalDelta
+    a.move(0, 21)
+    a.int_to_float(0, 0)     # v0 = (float) totalCycleCal
+    a.cmpl_float(1, 2, 0)
+    a.if_gez(1, "cs_kcal_ok")
+    a.move(2, 0)
+    a.label("cs_kcal_ok")
+    a.invoke_virtual([15, 2], refs["M_STEP_SET_KCAL"])
+
+    # Also deduct from hourly items[24] in cycling hours if items[24] is populated
+    a.invoke_virtual([15], refs["M_STEP_GET_ITEMS"])
+    a.move_result_object(8)
+    a.if_eqz(8, "ret_one")
+    a.array_length(0, 8)
+    a.const16(1, 24)
+    a.if_lt(0, 1, "ret_one")
+    a.const4(0, 0)  # h = 0; v5 = remaining delta
+    a.label("cs_it_loop")
+    a.if_ge(0, 1, "ret_one")
+    a.if_lez(5, "ret_one")
+    a.const4(2, 1)
+    a.items.append(("words", [0xB8 | ((2 | (0 << 4)) << 8)]))  # shl-int/2addr v2, v0
+    a.and_int_2addr(2, 9)
+    a.if_eqz(2, "cs_it_next")
+    a.aget(3, 8, 0)
+    a.if_lez(3, "cs_it_next")
+    a.move(4, 5)
+    a.if_le(4, 3, "cs_it_cap")
+    a.move(4, 3)
+    a.label("cs_it_cap")
+    a.sub_int_2addr(3, 4)
+    a.aput(3, 8, 0)
+    a.sub_int_2addr(5, 4)
+    a.label("cs_it_next")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("cs_it_loop")
+
+    # Self-heal if an earlier proportional-scaling pass dropped totalDistance/totalKcal below cycling totals
+    a.label("cs_chk_heal")
+    a.const4(7, 0)  # modified = 0
+    a.invoke_virtual([15], refs["M_STEP_GET_DIST"])
+    a.move_result(0)
+    a.move(1, 20)
+    a.cmpl_float(2, 0, 1)
+    a.if_gez(2, "cs_heal_cal")
+    a.int_to_float(0, 12)
+    a.const_float(2, 0.00074)
+    a.mul_float_2addr(0, 2)
+    a.add_float_2addr(0, 1)
+    a.invoke_virtual([15, 0], refs["M_STEP_SET_DIST"])
+    a.const4(7, 1)
+    a.label("cs_heal_cal")
+    a.invoke_virtual([15], refs["M_STEP_GET_KCAL"])
+    a.move_result(0)
+    a.move(1, 21)
+    a.int_to_float(1, 1)
+    a.cmpl_float(2, 0, 1)
+    a.if_gez(2, "cs_heal_ret")
+    a.int_to_float(0, 12)
+    a.const_float(2, 0.04)
+    a.mul_float_2addr(0, 2)
+    a.add_float_2addr(0, 1)
+    a.invoke_virtual([15, 0], refs["M_STEP_SET_KCAL"])
+    a.const4(7, 1)
+    a.label("cs_heal_ret")
+    a.return_int(7)
+
+    # ------------------------------------------------------------------ #
+    # Branch B: handleCyclingAutoPause(Location v15) -> 1 proceed, 0 skip
+    # Regs: v15=loc, v14=mmkv, v13=isRunning, v12=session,
+    #       v20,v21=nowMs, v18,v19=dtMs, v16,v17=curLat, v22=? (use regs=26!)
+    # ------------------------------------------------------------------ #
+    a.label("handle_auto_pause")
+    a.check_cast(15, refs["T_LOCATION"])
+    a.sget_boolean(13, refs["F_SRM_K"])
+    a.sget_object(12, refs["F_SRM_O"])
+    a.if_eqz(12, "ap_passthrough")
+
+    a.invoke_virtual([12], refs["M_WS_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "ap_passthrough")
+
+    a.invoke_static([], refs["M_MMKV_DEFAULT"])
+    a.move_result_object(14)
+    a.if_eqz(14, "ap_passthrough")
+
+    a.if_nez(13, "ap_calc_speed")
+    a.const_string(1, refs["STR_KEY_AUTO_PAUSED"])
+    a.const4(2, 0)
+    a.invoke_virtual([14, 1, 2], refs["M_MMKV_DEC_BOOL"])
+    a.move_result(0)
+    a.if_eqz(0, "ret_zero")
+
+    a.label("ap_calc_speed")
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(22)
+
+    a.invoke_virtual([15], refs["M_LOC_LAT"])
+    a.move_result_wide(18)
+    a.invoke_virtual([15], refs["M_LOC_LON"])
+    a.move_result_wide(16)
+
+    a.const_string(5, refs["STR_KEY_LAST_TIME"])
+    a.const_wide16(6, 0)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_DEC_LONG"])
+    a.move_result_wide(0)
+
+    a.const_string(5, refs["STR_KEY_LAST_LAT"])
+    a.const4(6, 0)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_DEC_FLOAT"])
+    a.move_result(2)
+
+    a.const_string(5, refs["STR_KEY_LAST_LON"])
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_DEC_FLOAT"])
+    a.move_result(3)
+
+    a.sub_long(20, 22, 0)
+
+    a.const_string(5, refs["STR_KEY_LAST_TIME"])
+    a.move_wide(6, 22)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_ENC_LONG"])
+
+    a.const_string(5, refs["STR_KEY_LAST_LAT"])
+    a.move_wide(6, 18)
+    a.double_to_float(6, 6)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_FLOAT"])
+
+    a.const_string(5, refs["STR_KEY_LAST_LON"])
+    a.move_wide(6, 16)
+    a.double_to_float(6, 6)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_FLOAT"])
+
+    a.const_wide16(4, 0)
+    a.cmp_long(4, 0, 4)
+    a.if_eqz(4, "ap_passthrough")
+    a.const_wide16(4, 500)
+    a.cmp_long(4, 20, 4)
+    a.if_ltz(4, "ap_passthrough")
+    a.const_wide32(4, 30000)
+    a.cmp_long(4, 20, 4)
+    a.if_gtz(4, "ap_passthrough")
+
+    a.move(9, 3)
+    a.float_to_double(0, 2)
+    a.float_to_double(2, 9)
+    a.move_wide(4, 18)
+    a.move_wide(6, 16)
+    a.const4(9, 3)
+    a.new_array(8, 9, refs["T_FLOAT_ARR"])
+    a.invoke_static_range(0, 9, refs["M_LOC_DIST_BETWEEN"])
+    a.const4(0, 0)
+    a.aget(11, 8, 0)
+
+    a.move_wide(0, 20)
+    a.long_to_float(10, 0)
+    a.const_float(0, 1000.0)
+    a.div_float_2addr(10, 0)
+
+    a.if_eqz(13, "ap_check_resume")
+
+    # ---- Currently running: auto-pause if speed < 1.0 m/s (3.6 km/h) for >= 5s ----
+    a.invoke_virtual([12], refs["M_WS_GET_DUR"])
+    a.move_result_wide(0)
+    a.const_wide16(2, 10)
+    a.cmp_long(0, 0, 2)
+    a.if_ltz(0, "ret_one")
+
+    a.cmpl_float(0, 11, 10)
+    a.if_gez(0, "ap_moving_reset")
+
+    a.const_string(5, refs["STR_KEY_LOW_SINCE"])
+    a.const_wide16(6, 0)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_DEC_LONG"])
+    a.move_result_wide(0)
+    a.const_wide16(2, 0)
+    a.cmp_long(2, 0, 2)
+    a.if_nez(2, "ap_chk_5s")
+
+    a.move_wide(6, 22)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_ENC_LONG"])
+    a.goto16("ret_one")
+
+    a.label("ap_chk_5s")
+    a.sub_long(0, 22, 0)
+    a.const_wide16(2, 5000)
+    a.cmp_long(0, 0, 2)
+    a.if_ltz(0, "ret_one")
+
+    a.const_wide16(6, 0)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_ENC_LONG"])
+    a.const_string(5, refs["STR_KEY_STREAK"])
+    a.const4(6, 0)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_INT"])
+    a.const_string(5, refs["STR_KEY_AUTO_PAUSED"])
+    a.const4(6, 1)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_BOOL"])
+    a.const_string(5, refs["STR_KEY_AUTO_TRIGGER"])
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_BOOL"])
+    a.invoke_static([], refs["M_HYAPP_CTX"])
+    a.move_result_object(0)
+    a.const4(1, 0)
+    a.invoke_static([0, 1], refs["M_SRM_PAUSE_H"])
+    a.goto16("ret_zero")
+
+    a.label("ap_moving_reset")
+    a.const_string(5, refs["STR_KEY_LOW_SINCE"])
+    a.const_wide16(6, 0)
+    a.invoke_virtual([14, 5, 6, 7], refs["M_MMKV_ENC_LONG"])
+    a.goto16("ret_one")
+
+    # ---- Currently auto-paused: auto-resume on 2 consecutive fixes >= 1.5 m/s (5.4 km/h) ----
+    a.label("ap_check_resume")
+    a.invoke_virtual([15], refs["M_LOC_ACC"])
+    a.move_result(0)
+    a.const_float(1, 35.0)
+    a.cmpl_float(0, 0, 1)
+    a.if_gtz(0, "ret_zero")
+
+    a.const_float(0, 30.0)
+    a.mul_float(0, 10, 0)
+    a.cmpl_float(0, 11, 0)
+    a.if_gtz(0, "ret_zero")
+
+    a.const_float(0, 1.5)
+    a.mul_float(0, 10, 0)
+    a.cmpl_float(0, 11, 0)
+    a.if_ltz(0, "ap_reset_streak")
+
+    a.const_string(5, refs["STR_KEY_STREAK"])
+    a.const4(6, 0)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_DEC_INT"])
+    a.move_result(6)
+    a.add_int_lit8(6, 6, 1)
+    a.const4(0, 2)
+    a.if_ge(6, 0, "ap_do_resume")
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_INT"])
+    a.goto16("ret_zero")
+
+    a.label("ap_do_resume")
+    a.const4(6, 0)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_INT"])
+    a.invoke_static([], refs["M_HYAPP_CTX"])
+    a.move_result_object(0)
+    a.const4(1, 0)
+    a.invoke_static([0, 1], refs["M_SRM_CONT_B"])
+    a.goto16("ret_one")
+
+    a.label("ap_reset_streak")
+    a.const_string(5, refs["STR_KEY_STREAK"])
+    a.const4(6, 0)
+    a.invoke_virtual([14, 5, 6], refs["M_MMKV_ENC_INT"])
+    a.goto16("ret_zero")
+
+    a.label("ap_passthrough")
+    a.return_int(13)
+
+    return a.assemble(pad_to_words=pad_words)
+
+
+def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> bytes:
+    """
+    Build Lcom/liesheng/haylou/ui/main/WebViewActivity;->getCountryCode()I
+    (swapped into SportTable.copy$default, 649 words, regs=30, ins=0, outs=9).
+
+    Walks the last 30 days (including today) idempotently:
+      1) Post-sync moving time & avg speed cleanup on cycling SportTables with GPS tracks
+         (strips < 0.85 m/s / < 3.06 km/h stops when >= 10s stopped; marks movingTime > 0).
+      2) Phantom cycling step cleanup on each cycling day's StepDataTable via ObjectHelper.hashCode.
+    """
+    a = DalvikAssembler()
+
+    # Load SportDao (v27), StepDataDao (v26), nowMs (v24,v25)
+    a.sget_object(0, refs["F_APPDB_A"])
+    a.invoke_virtual([0], refs["M_APPDB_B"])
+    a.move_result_object(1)
+    a.invoke_virtual([1], refs["M_APPDB_SPORT_DAO"])
+    a.move_result_object(27)
+    a.invoke_virtual([1], refs["M_APPDB_STEP_DAO"])
+    a.move_result_object(26)
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(24)
+
+    a.const16(23, 0)  # dayOffset = 0..29
+    a.label("bf_day_loop")
+    a.move(0, 23)
+    a.const16(1, 30)
+    a.if_ge(0, 1, "bf_done")
+
+    # targetMs = nowMs - dayOffset * 86400000L
+    a.int_to_long(0, 0)
+    a.const_wide32(2, 86400000)
+    a.mul_long_2addr(0, 2)
+    a.move_wide(2, 24)
+    a.sub_long_2addr(2, 0)
+
+    # chinaMidMs (v21,v22) = IDataHelper.z(targetMs).getTime()
+    a.invoke_static([2, 3], refs["M_IDATA_Z"])
+    a.move_result_object(0)
+    a.if_eqz(0, "bf_day_next")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(21)
+
+    # localMidMs (v19,v20) = ktx/c.b(chinaMidMs)
+    a.move_wide(0, 21)
+    a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
+    a.move_result_wide(19)
+
+    # sports (v18) = SportDao.getSportDataByDate(localMidMs, localMidMs + 86400000L)
+    a.move_object(0, 27)
+    a.move_wide(1, 19)
+    a.const_wide32(3, 86400000)
+    a.add_long_2addr(3, 1)
+    a.invoke_interface([0, 1, 2, 3, 4], refs["M_SPORT_BY_DATE"])
+    a.move_result_object(18)
+    a.if_eqz(18, "bf_day_next")
+    a.move_object(0, 18)
+    a.invoke_interface([0], refs["M_LIST_SIZE"])
+    a.move_result(17)
+    a.if_lez(17, "bf_day_next")
+
+    a.const16(16, 0)  # spIdx = 0
+    a.const4(15, 0)   # hasCycle = 0
+
+    a.label("bf_sp_loop")
+    a.move(0, 16)
+    a.move(1, 17)
+    a.if_ge(0, 1, "bf_sp_done")
+
+    a.move_object(2, 18)
+    a.invoke_interface([2, 0], refs["M_LIST_GET"])
+    a.move_result_object(14)
+    a.check_cast(14, refs["T_SPORT_TABLE"])
+
+    # Cycling check
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "bf_sp_next")
+
+    a.const4(15, 1)  # hasCycle = 1
+
+    # Skip moving-time GPS scan if already processed (movingTime > 0),
+    # EXCEPT self-heal rides previously clamped to (duration=60, movingTime=60)
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_DUR"])
+    a.move_result(4)  # v4 = origDur
+    a.const16(1, 60)
+    a.if_lt(4, 1, "bf_sp_next")
+
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_MOVING"])
+    a.move_result_wide(0)
+    a.const_wide16(2, 0)
+    a.cmp_long(2, 0, 2)
+    a.if_lez(2, "bf_need_scan")
+    # movingTime > 0: only re-scan if both movingTime == 60L and origDur == 60
+    a.const_wide16(2, 60)
+    a.cmp_long(2, 0, 2)
+    a.if_nez(2, "bf_sp_next")
+    a.const16(1, 60)
+    a.if_ne(4, 1, "bf_sp_next")
+
+    a.label("bf_need_scan")
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_POINTS"])
+    a.move_result_object(13)
+    a.if_eqz(13, "bf_sp_next")
+    a.move_object(0, 13)
+    a.invoke_interface([0], refs["M_LIST_SIZE"])
+    a.move_result(12)
+    a.const4(1, 5)
+    a.if_lt(12, 1, "bf_sp_next")
+
+    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx)
+    a.const4(0, 3)
+    a.new_array(8, 0, refs["T_FLOAT_ARR"])
+    a.const_wide16(9, 0)
+    a.const_wide16(30, 0)
+    a.const4(11, 1)
+
+    a.label("bf_pt_loop")
+    a.if_ge(11, 12, "bf_pt_done")
+    a.add_int_lit8(1, 11, -1)
+    a.invoke_interface([13, 1], refs["M_LIST_GET"])
+    a.move_result_object(0)
+    a.check_cast(0, refs["T_LATLNG"])  # v0 = pPrev
+
+    a.invoke_interface([13, 11], refs["M_LIST_GET"])
+    a.move_result_object(6)
+    a.check_cast(6, refs["T_LATLNG"])  # v6 = pCur
+
+    # dtMs = pCur.getTime() - pPrev.getTime()
+    a.invoke_virtual([0], refs["M_PT_TIME"])
+    a.move_result_wide(2)
+    a.invoke_virtual([6], refs["M_PT_TIME"])
+    a.move_result_wide(4)
+    a.sub_long_2addr(4, 2)
+    a.const_wide16(2, 0)
+    a.cmp_long(1, 4, 2)
+    a.if_gtz(1, "bf_dt_pos")
+    a.const_wide16(4, 2000)
+    a.label("bf_dt_pos")
+    # Skip GPS gaps > 30s (manual watch pauses / GPS dropouts already excluded from Watch validTime)
+    a.const_wide32(2, 30000)
+    a.cmp_long(1, 4, 2)
+    a.if_gtz(1, "bf_pt_next")
+    a.move_wide(28, 4)  # save dtMs in v28,v29
+
+    # Load lat2(v4,v5), lon2(v6,v7), lon1(v2,v3), lat1(v0,v1) for distanceBetween(v0..v8)
+    a.invoke_virtual([6], refs["M_PT_LAT"])
+    a.move_result_wide(4)
+    a.invoke_virtual([6], refs["M_PT_LON"])
+    a.move_result_wide(6)
+    a.invoke_virtual([0], refs["M_PT_LON"])
+    a.move_result_wide(2)
+    a.invoke_virtual([0], refs["M_PT_LAT"])
+    a.move_result_wide(0)
+    a.invoke_static_range(0, 9, refs["M_LOC_DIST_BETWEEN"])
+
+    a.const4(1, 0)
+    a.aget(0, 8, 1)              # v0 = d (meters)
+    a.move_wide(2, 28)           # v2,v3 = dtMs
+    a.long_to_float(1, 2)        # v1 = (float) dtMs
+    a.const_float(4, 0.00085)    # 0.85 m/s = 0.00085 m/ms (~3.06 km/h)
+    a.mul_float_2addr(1, 4)      # v1 = 0.85 * dtSec
+    a.cmpl_float(4, 0, 1)        # d < 0.85 * dtSec ?
+    a.if_gez(4, "bf_pt_moving")
+    a.add_long_2addr(9, 2)       # stoppedMs += dtMs
+    a.goto16("bf_pt_next")
+    a.label("bf_pt_moving")
+    a.add_long(30, 30, 2)        # movingMs += dtMs
+
+    a.label("bf_pt_next")
+    a.add_int_lit8(11, 11, 1)
+    a.goto16("bf_pt_loop")
+
+    a.label("bf_pt_done")
+    a.move_wide(0, 9)
+    a.const_wide16(2, 1000)
+    a.div_long_2addr(0, 2)
+    a.long_to_int(0, 0)          # v0 = stoppedSec
+
+    a.move_wide(4, 30)
+    a.div_long_2addr(4, 2)
+    a.long_to_int(6, 4)          # v6 = movingSec
+
+    a.move_object(1, 14)
+    a.invoke_virtual([1], refs["M_SPORT_GET_DUR"])
+    a.move_result(1)             # v1 = origDur
+    a.move(2, 1)                 # v2 = newDur = origDur
+
+    # Self-heal previously 60s-clamped watch-paused ride from GPS movingSec
+    a.const16(3, 60)
+    a.if_ne(1, 3, "bf_norm_dur")
+    a.if_le(6, 3, "bf_sp_mark")
+    a.move(2, 6)
+    a.goto16("bf_dur_ok")
+
+    a.label("bf_norm_dur")
+    a.const16(3, 10)
+    a.if_lt(0, 3, "bf_sp_mark")  # only adjust duration if stopped >= 10s
+    a.sub_int_2addr(2, 0)        # newDur = origDur - stoppedSec
+    a.const16(3, 60)
+    a.if_ge(2, 3, "bf_dur_ok")
+    a.move(2, 3)                 # floor at max(60, movingSec)
+    a.if_le(6, 2, "bf_dur_ok")
+    a.move(2, 6)
+    a.label("bf_dur_ok")
+    a.move_object(0, 14)
+    a.invoke_virtual([0, 2], refs["M_SPORT_SET_DUR"])
+
+    a.label("bf_sp_mark")
+    a.int_to_long(4, 2)
+    a.move_object(0, 14)
+    a.invoke_virtual([0, 4, 5], refs["M_SPORT_SET_MOVING"])
+    a.move_object(0, 27)
+    a.move_object(1, 14)
+    a.invoke_interface([0, 1], refs["M_SPORT_UPDATE"])
+
+    a.label("bf_sp_next")
+    a.add_int_lit8(16, 16, 1)
+    a.goto16("bf_sp_loop")
+
+    # Clean this day's StepDataTable if it has any cycling workouts
+    a.label("bf_sp_done")
+    a.if_eqz(15, "bf_day_next")
+    a.move_object(0, 26)
+    a.move_wide(1, 21)
+    a.invoke_interface([0, 1, 2], refs["M_STEP_BY_DATE"])
+    a.move_result_object(0)
+    a.if_eqz(0, "bf_day_next")
+    a.invoke_static([0], refs["M_OBJ_HASH"])
+    a.move_result(1)
+    a.if_eqz(1, "bf_day_next")
+    a.move_object(1, 26)
+    a.invoke_interface([1, 0], refs["M_STEP_INSERT"])
+
+    a.label("bf_day_next")
+    a.add_int_lit8(23, 23, 1)
+    a.goto16("bf_day_loop")
+
+    a.label("bf_done")
+    a.const4(0, 0)
+    a.return_int(0)
+    return a.assemble(pad_to_words=pad_words)
+
+
+def _build_idata_u_insns(d6: DexFile, refs: dict, pad_words: int) -> bytes:
+    """
+    Build Lcom/liesheng/haylou/db/datahelper/IDataHelper;->u(Lcom/yingsheng/protocol/data/bean/RealStepData;)V
+    (swapped into UserInfoTable.copy$default, 420 words, regs=20, ins=2, outs=11, p0=v18, p1=v19).
+
+    Subtracts today's stripped cycling steps (StepDataTable.baseSteps) from incoming live BLE
+    RealStepData packets before IDataHelper.J(RealStepData) computes its hourly delta, so real-time
+    step updates never re-inflate removed cycling steps.
+    """
+    a = DalvikAssembler()
+
+    a.if_eqz(19, "u_ret")
+    a.move_object(0, 19)
+    a.invoke_virtual([0], refs["M_RS_STEP"])
+    a.move_result(16)  # v16 = rawSteps
+    a.if_lez(16, "u_ret")
+
+    # Preserve original e.e = System.currentTimeMillis() timestamp update
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(0)
+    a.sput_wide(0, refs["F_DBE_E"])
+
+    # Fetch today's StepDataTable
+    a.invoke_static([0, 1], refs["M_IDATA_Z"])
+    a.move_result_object(0)
+    a.if_eqz(0, "u_call_j")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(1)
+    a.sget_object(0, refs["F_APPDB_A"])
+    a.invoke_virtual([0], refs["M_APPDB_B"])
+    a.move_result_object(0)
+    a.invoke_virtual([0], refs["M_APPDB_STEP_DAO"])
+    a.move_result_object(0)
+    a.invoke_interface([0, 1, 2], refs["M_STEP_BY_DATE"])
+    a.move_result_object(17)
+    a.if_eqz(17, "u_call_j")
+
+    # Check stripped cycling steps (baseSteps)
+    a.move_object(0, 17)
+    a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
+    a.move_result(12)  # v12 = baseSteps
+    a.if_lez(12, "u_call_j")
+
+    # adjSteps (v15) = rawSteps - baseSteps; skip J if <= db.totalSteps (avoids J's overwrite branch)
+    a.move(0, 16)
+    a.sub_int_2addr(0, 12)
+    a.if_lez(0, "u_ret")
+    a.move(15, 0)
+
+    a.move_object(1, 17)
+    a.invoke_virtual([1], refs["M_STEP_GET_TOTAL"])
+    a.move_result(1)
+    a.if_le(0, 1, "u_ret")
+
+    # Deduct ONLY walking-equivalent cal (40 cal/step = 0.04 kcal * 1000) & distance (0.74 m/step)
+    # of stripped cycling steps so real bike calories & distance remain intact
+    a.move_object(0, 19)
+    a.invoke_virtual([0], refs["M_RS_CAL"])
+    a.move_result(14)
+    a.mul_int_lit8(0, 12, 40)
+    a.sub_int_2addr(14, 0)
+    a.if_gez(14, "u_cal_ok")
+    a.const4(14, 0)
+    a.label("u_cal_ok")
+
+    a.move_object(0, 19)
+    a.invoke_virtual([0], refs["M_RS_DIST"])
+    a.move_result(13)
+    a.mul_int_lit8(0, 12, 74)
+    a.div_int_lit8(0, 0, 100)
+    a.sub_int_2addr(13, 0)
+    a.if_gez(13, "u_dist_ok")
+    a.const4(13, 0)
+    a.label("u_dist_ok")
+
+    # Construct adjusted RealStepData(stepHour, adjSteps, adjCal, adjDist, activeDur, standCnt, walk, run, 0, null)
+    a.new_instance(0, refs["T_REALSTEP"])
+    a.move_object(1, 19)
+    a.invoke_virtual([1], refs["M_RS_HOUR"])
+    a.move_result(1)
+    a.move(2, 15)
+    a.move(3, 14)
+    a.move(4, 13)
+    a.move_object(5, 19)
+    a.invoke_virtual([5], refs["M_RS_DUR"])
+    a.move_result(5)
+    a.move_object(6, 19)
+    a.invoke_virtual([6], refs["M_RS_STAND"])
+    a.move_result(6)
+    a.move_object(7, 19)
+    a.invoke_virtual([7], refs["M_RS_WALK"])
+    a.move_result(7)
+    a.move_object(8, 19)
+    a.invoke_virtual([8], refs["M_RS_RUN"])
+    a.move_result(8)
+    a.const4(9, 0)
+    a.const4(10, 0)
+    a.invoke_direct_range(0, 11, refs["M_REALSTEP_INIT"])
+    a.move_object(19, 0)
+
+    a.label("u_call_j")
+    a.move_object(0, 18)
+    a.move_object(1, 19)
+    a.invoke_virtual([0, 1], refs["M_IDATA_J"])
+
+    a.label("u_ret")
+    a.return_void()
+    return a.assemble(pad_to_words=pad_words)
+
+
+def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
+    """
+    Patch classes6.dex with all three cycling fixes for Watch 4S + Haylou Fun:
+      1) Phantom cycling step removal (IDataHelper.N + IDataHelper.u + 30-day backfill)
+      2) Post-sync GPS moving time & avg speed cleanup (CommonUtil.z + 30-day backfill)
+      3) Live GPS auto-pause & auto-resume for phone-started cycling
+         (SportRunningManager.onLocationChange + h + b)
+    """
+    print("[*] Patching classes6.dex (Cycling Fixes: Phantom Steps + Moving Time + Live GPS Auto-Pause)...")
+    d6 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    refs = {
+        "T_SPORT_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/SportTable;"),
+        "T_STEP_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/StepDataTable;"),
+        "T_LATLNG": d6.find_idx("type", "Lcom/liesheng/lib_room/table/LatlngPoint;"),
+        "T_LOCATION": d6.find_idx("type", "Landroid/location/Location;"),
+        "T_REALSTEP": d6.find_idx("type", "Lcom/yingsheng/protocol/data/bean/RealStepData;"),
+        "T_INT_ARR": d6.find_idx("type", "[I"),
+        "T_FLOAT_ARR": d6.find_idx("type", "[F"),
+        "F_APPDB_A": d6.find_idx("field", "Lcom/liesheng/AppDatabase;->a:Lcom/liesheng/AppDatabase$a;"),
+        "F_STM_INST": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->INSTANCE:Lcom/liesheng/hayloufun/sport/data/SportTypeManager;"),
+        "F_SRM_K": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->k:Z"),
+        "F_SRM_O": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->o:Lcom/liesheng/hayloufun/sport/running/WorkoutSession;"),
+        "F_DBE_E": d6.find_idx("field", "Lcom/liesheng/haylou/db/e;->e:J"),
+        "M_APPDB_B": d6.find_idx("method", "Lcom/liesheng/AppDatabase$a;->b()Lcom/liesheng/AppDatabase;"),
+        "M_APPDB_SPORT_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->u()Lcom/liesheng/lib_room/dao/SportDao;"),
+        "M_APPDB_STEP_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->w()Lcom/liesheng/lib_room/dao/StepDataDao;"),
+        "M_SPORT_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/SportDao;->getSportDataByDate(JJ)Ljava/util/List;"),
+        "M_SPORT_UPDATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/SportDao;->update(Lcom/liesheng/lib_room/table/SportTable;)V"),
+        "M_STEP_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/StepDataDao;->getStepDataByDate(J)Lcom/liesheng/lib_room/table/StepDataTable;"),
+        "M_STEP_INSERT": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/StepDataDao;->insert(Lcom/liesheng/lib_room/table/StepDataTable;)V"),
+        "M_IDATA_Z": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->z(J)Ljava/util/Date;"),
+        "M_IDATA_J": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->J(Lcom/yingsheng/protocol/data/bean/RealStepData;)V"),
+        "M_CHINA_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->b(J)J"),
+        "M_STM_MAIN_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->getMainTypeByType(I)I"),
+        "M_SPORT_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getType()I"),
+        "M_SPORT_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDuration()I"),
+        "M_SPORT_SET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setDuration(I)V"),
+        "M_SPORT_GET_MOVING": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getMovingTime()J"),
+        "M_SPORT_SET_MOVING": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMovingTime(J)V"),
+        "M_SPORT_GET_POINTS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getPoints()Ljava/util/List;"),
+        "M_SPORT_START": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getStartTime()Ljava/util/Date;"),
+        "M_SPORT_END": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getEndTime()Ljava/util/Date;"),
+        "M_SPORT_GET_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSteps()I"),
+        "M_SPORT_GET_DIST": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDistance()F"),
+        "M_SPORT_GET_CAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getCal()I"),
+        "M_PT_LAT": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getLatitude()D"),
+        "M_PT_LON": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getLongitude()D"),
+        "M_PT_TIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getTime()J"),
+        "M_LOC_DIST_BETWEEN": d6.find_idx("method", "Landroid/location/Location;->distanceBetween(DDDD[F)V"),
+        "M_LOC_LAT": d6.find_idx("method", "Landroid/location/Location;->getLatitude()D"),
+        "M_LOC_LON": d6.find_idx("method", "Landroid/location/Location;->getLongitude()D"),
+        "M_LOC_ACC": d6.find_idx("method", "Landroid/location/Location;->getAccuracy()F"),
+        "M_STEP_GET_RECDATE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getRecordDate()Ljava/util/Date;"),
+        "M_STEP_GET_ITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getItems()[I"),
+        "M_STEP_GET_TOTAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalSteps()I"),
+        "M_STEP_SET_TOTAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setTotalSteps(I)V"),
+        "M_STEP_GET_DIST": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalDistance()F"),
+        "M_STEP_SET_DIST": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setTotalDistance(F)V"),
+        "M_STEP_GET_KCAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalKcal()F"),
+        "M_STEP_SET_KCAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setTotalKcal(F)V"),
+        "M_STEP_GET_BASE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getBaseSteps()I"),
+        "M_STEP_SET_BASE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setBaseSteps(I)V"),
+        "M_STEP_GET_SPORT_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getSportSteps()[I"),
+        "M_STEP_SET_SPORT_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setSportSteps([I)V"),
+        "M_REALSTEP_INIT": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;-><init>(IIIIIIIIILkotlin/jvm/internal/i;)V"),
+        "M_RS_HOUR": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStepHour()I"),
+        "M_RS_STEP": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getRealTimeStep()I"),
+        "M_RS_CAL": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStepCal()I"),
+        "M_RS_DIST": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStepDistance()I"),
+        "M_RS_DUR": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getActiveDuration()I"),
+        "M_RS_STAND": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStandCount()I"),
+        "M_RS_WALK": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStepsWalk()I"),
+        "M_RS_RUN": d6.find_idx("method", "Lcom/yingsheng/protocol/data/bean/RealStepData;->getStepsRun()I"),
+        "M_SRM_PAUSE_H": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->h(Landroid/content/Context;Z)V"),
+        "M_SRM_CONT_B": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->b(Landroid/content/Context;Z)V"),
+        "M_WS_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/running/WorkoutSession;->getSportType()I"),
+        "M_WS_GET_DUR": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/running/WorkoutSession;->getSportDuration()J"),
+        "M_HYAPP_CTX": d6.find_idx("method", "Lcom/liesheng/haylou/app/HyApplication;->getContext()Lcom/liesheng/haylou/app/HyApplication;"),
+        "M_MMKV_DEFAULT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->defaultMMKV()Lcom/tencent/mmkv/MMKV;"),
+        "M_MMKV_DEC_BOOL": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->decodeBool(Ljava/lang/String;Z)Z"),
+        "M_MMKV_ENC_BOOL": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->encode(Ljava/lang/String;Z)Z"),
+        "M_MMKV_DEC_LONG": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->decodeLong(Ljava/lang/String;J)J"),
+        "M_MMKV_ENC_LONG": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->encode(Ljava/lang/String;J)Z"),
+        "M_MMKV_DEC_FLOAT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->decodeFloat(Ljava/lang/String;F)F"),
+        "M_MMKV_ENC_FLOAT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->encode(Ljava/lang/String;F)Z"),
+        "M_MMKV_DEC_INT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->decodeInt(Ljava/lang/String;I)I"),
+        "M_MMKV_ENC_INT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->encode(Ljava/lang/String;I)Z"),
+        "M_LIST_SIZE": d6.find_idx("method", "Ljava/util/List;->size()I"),
+        "M_LIST_GET": d6.find_idx("method", "Ljava/util/List;->get(I)Ljava/lang/Object;"),
+        "M_DATE_GET_TIME": d6.find_idx("method", "Ljava/util/Date;->getTime()J"),
+        "M_SYS_TIME": d6.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J"),
+        "M_OBJ_HASH": d6.find_idx("method", "Lio/reactivex/internal/functions/ObjectHelper;->hashCode(Ljava/lang/Object;)I"),
+        "M_GET_CC": d6.find_idx("method", "Lcom/liesheng/haylou/ui/main/WebViewActivity;->getCountryCode()I"),
+        # Collision-free MMKV keys reusing Kotlin data-class toString() fragments
+        "STR_KEY_AUTO_PAUSED": d6.find_idx("string", ", hideCyclingForbiddenRoads="),
+        "STR_KEY_AUTO_TRIGGER": d6.find_idx("string", ", movingTime="),
+        "STR_KEY_LOW_SINCE": d6.find_idx("string", ", freeTime="),
+        "STR_KEY_LAST_TIME": d6.find_idx("string", ", stepHour="),
+        "STR_KEY_LAST_LAT": d6.find_idx("string", ", avgStepStride="),
+        "STR_KEY_LAST_LON": d6.find_idx("string", ", stride="),
+        "STR_KEY_STREAK": d6.find_idx("string", ", step="),
+    }
+
+    def _swap_or_refresh(target_info, host_info, regs, ins, outs, build_fn, swapped_min_words, stub_ret_int=False):
+        if target_info["insns_size"] >= swapped_min_words:
+            insns = build_fn(target_info["insns_size"])
+            struct.pack_into("<4H2I", buf, target_info["code_off"], regs, ins, outs, 0, 0, target_info["insns_size"])
+            buf[target_info["code_off"] + 16 : target_info["code_off"] + 16 + len(insns)] = insns
+            return
+        assert target_info["code_pos_len"] == 4 and host_info["code_pos_len"] == 4
+        insns = build_fn(host_info["insns_size"])
+        struct.pack_into("<4H2I", buf, host_info["code_off"], regs, ins, outs, 0, 0, host_info["insns_size"])
+        buf[host_info["code_off"] + 16 : host_info["code_off"] + 16 + len(insns)] = insns
+
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        if stub_ret_int:
+            stub.return_int(0)
+        else:
+            stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=target_info["insns_size"])
+        struct.pack_into(
+            "<4H2I",
+            buf,
+            target_info["code_off"],
+            host_info["ins_size"] + 1,
+            host_info["ins_size"],
+            0,
+            0,
+            0,
+            target_info["insns_size"],
+        )
+        buf[target_info["code_off"] + 16 : target_info["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[target_info["code_pos"] : target_info["code_pos"] + 4] = encode_uleb128_4bytes(host_info["code_off"])
+        buf[host_info["code_pos"] : host_info["code_pos"] + 4] = encode_uleb128_4bytes(target_info["code_off"])
+
+    # 1) ObjectHelper.hashCode(Object)I <-> SportTable.copy$default (649w)
+    m_obj_hash = d6.find_method_info(
+        "Lio/reactivex/internal/functions/ObjectHelper;",
+        "Lio/reactivex/internal/functions/ObjectHelper;->hashCode(Ljava/lang/Object;)I",
+    )
+    m_host_sport = d6.find_method_info(
+        "Lcom/liesheng/lib_room/table/SportTable;",
+        "Lcom/liesheng/lib_room/table/SportTable;->copy$default(Lcom/liesheng/lib_room/table/SportTable;Ljava/util/Date;Ljava/lang/String;Ljava/util/Date;IIIIILjava/lang/String;FIIIIIIIIII[I[I[ILjava/util/List;IZZZLjava/lang/Integer;IIIII[IIIIIJLjava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;IIIILjava/lang/Object;)Lcom/liesheng/lib_room/table/SportTable;",
+    )
+    _swap_or_refresh(
+        m_obj_hash, m_host_sport, regs=26, ins=1, outs=9,
+        build_fn=lambda pad: _build_cycling_obj_helper_insns(d6, refs, pad),
+        swapped_min_words=600,
+    )
+
+    # 2) WebViewActivity.getCountryCode()I <-> SportBasicTable.copy$default (571w)
+    m_get_cc = d6.find_method_info(
+        "Lcom/liesheng/haylou/ui/main/WebViewActivity;",
+        "Lcom/liesheng/haylou/ui/main/WebViewActivity;->getCountryCode()I",
+    )
+    # Promote getCountryCode() from private static (0x0a) to public static (0x09) so
+    # SportRecordWidgetDataLoader and CommonUtil can invoke it across packages
+    if m_get_cc["access_flags"] == 0x0A:
+        buf[m_get_cc["acc_pos"]] = 0x09
+    m_host_basic = d6.find_method_info(
+        "Lcom/liesheng/lib_room/table/SportBasicTable;",
+        "Lcom/liesheng/lib_room/table/SportBasicTable;->copy$default(Lcom/liesheng/lib_room/table/SportBasicTable;Ljava/util/Date;Ljava/lang/String;Ljava/util/Date;IIIIILjava/lang/String;FIIIIIIIIIIIZZZLjava/lang/Integer;IIIIIIIIIJLjava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;IIIIILjava/lang/Object;)Lcom/liesheng/lib_room/table/SportBasicTable;",
+    )
+    _swap_or_refresh(
+        m_get_cc, m_host_basic, regs=32, ins=0, outs=9,
+        build_fn=lambda pad: _build_cycling_backfill_insns(d6, refs, pad),
+        swapped_min_words=500,
+    )
+
+    # 3) IDataHelper.N(StepDataTable)V <-> StepDetailsList.copy$default (255w)
+    m_idh_n = d6.find_method_info(
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;",
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->N(Lcom/liesheng/lib_room/table/StepDataTable;)V",
+    )
+    m_host_step_det = d6.find_method_info(
+        "Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;",
+        "Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;->copy$default(Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IFLjava/lang/String;FFIIII[I[I[II[F[F[ILjava/lang/String;ILjava/lang/Object;)Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;",
+    )
+    if m_idh_n["insns_size"] < 200:
+        assert m_idh_n["code_pos_len"] == 4 and m_host_step_det["code_pos_len"] == 4
+        orig_n_bytes = dex_bytes[m_idh_n["code_off"] + 16 : m_idh_n["code_off"] + 16 + m_idh_n["insns_size"] * 2]
+        pre = DalvikAssembler()
+        pre.const4(0, 0)
+        pre.invoke_virtual([4, 0], refs["M_STEP_SET_BASE"])
+        pre.invoke_virtual([4, 0], refs["M_STEP_SET_SPORT_STEPS"])
+        pre.invoke_static([4], refs["M_OBJ_HASH"])
+        pre_bytes = pre.assemble()
+        combined = pre_bytes + orig_n_bytes
+        pad_w = m_host_step_det["insns_size"] - len(combined) // 2
+        assert pad_w >= 0
+        struct.pack_into(
+            "<4H2I", buf, m_host_step_det["code_off"],
+            m_idh_n["regs_size"], m_idh_n["ins_size"], max(m_idh_n["outs_size"], 2), 0, 0, m_host_step_det["insns_size"],
+        )
+        buf[m_host_step_det["code_off"] + 16 : m_host_step_det["code_off"] + 16 + m_host_step_det["insns_size"] * 2] = (
+            combined + b"\x00\x00" * pad_w
+        )
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_idh_n["insns_size"])
+        struct.pack_into("<4H2I", buf, m_idh_n["code_off"], m_host_step_det["ins_size"] + 1, m_host_step_det["ins_size"], 0, 0, 0, m_idh_n["insns_size"])
+        buf[m_idh_n["code_off"] + 16 : m_idh_n["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_idh_n["code_pos"] : m_idh_n["code_pos"] + 4] = encode_uleb128_4bytes(m_host_step_det["code_off"])
+        buf[m_host_step_det["code_pos"] : m_host_step_det["code_pos"] + 4] = encode_uleb128_4bytes(m_idh_n["code_off"])
+
+    # 4) IDataHelper.u(RealStepData)V <-> UserInfoTable.copy$default (420w)
+    m_idh_u = d6.find_method_info(
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;",
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->u(Lcom/yingsheng/protocol/data/bean/RealStepData;)V",
+    )
+    m_host_user = d6.find_method_info(
+        "Lcom/liesheng/lib_room/table/UserInfoTable;",
+        "Lcom/liesheng/lib_room/table/UserInfoTable;->copy$default(Lcom/liesheng/lib_room/table/UserInfoTable;Ljava/lang/Long;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IILjava/lang/String;IILjava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;FIILjava/lang/Object;)Lcom/liesheng/lib_room/table/UserInfoTable;",
+    )
+    _swap_or_refresh(
+        m_idh_u, m_host_user, regs=20, ins=2, outs=11,
+        build_fn=lambda pad: _build_idata_u_insns(d6, refs, pad),
+        swapped_min_words=300,
+    )
+
+    # 5) SportRunningManager.h(Context, Z)V <-> ClockReminderHelperKt.parseCustomReminder2Code(String)I (207w)
+    m_srm_h = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;",
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->h(Landroid/content/Context;Z)V",
+    )
+    m_host_clock = d6.find_method_info(
+        "Lcom/liesheng/haylou/ui/device/data/ClockReminderHelperKt;",
+        "Lcom/liesheng/haylou/ui/device/data/ClockReminderHelperKt;->parseCustomReminder2Code(Ljava/lang/String;)I",
+    )
+    if m_srm_h["insns_size"] < 200:
+        assert m_srm_h["code_pos_len"] == 4 and m_host_clock["code_pos_len"] == 4
+        orig_h = dex_bytes[m_srm_h["code_off"] + 16 : m_srm_h["code_off"] + 16 + m_srm_h["insns_size"] * 2]
+        # Split at +0083 (131 words = 262 bytes), right before `new-instance v6, Intent` (0x22)
+        assert orig_h[0x83 * 2] == 0x22, f"Unexpected opcode at SportRunningManager.h+0083: 0x{orig_h[0x83*2]:02x}"
+        mid = DalvikAssembler()
+        mid.invoke_static([], refs["M_MMKV_DEFAULT"])
+        mid.move_result_object(0)
+        mid.if_eqz(0, "h_stop_gps")
+        mid.const_string(2, refs["STR_KEY_AUTO_TRIGGER"])
+        mid.const4(3, 0)
+        mid.invoke_virtual([0, 2, 3], refs["M_MMKV_DEC_BOOL"])
+        mid.move_result(4)
+        mid.if_eqz(4, "h_manual")
+        mid.invoke_virtual([0, 2, 3], refs["M_MMKV_ENC_BOOL"])  # clear autoTrigger, keep GPS alive!
+        mid.return_void()
+        mid.label("h_manual")
+        mid.const_string(2, refs["STR_KEY_AUTO_PAUSED"])
+        mid.invoke_virtual([0, 2, 3], refs["M_MMKV_ENC_BOOL"])  # clear autoPaused on manual pause
+        mid.label("h_stop_gps")
+        combined_h = orig_h[: 0x83 * 2] + mid.assemble() + orig_h[0x83 * 2 :]
+        pad_w = m_host_clock["insns_size"] - len(combined_h) // 2
+        assert pad_w >= 0, f"SportRunningManager.h overflow: {len(combined_h)//2} > {m_host_clock['insns_size']}"
+        struct.pack_into(
+            "<4H2I", buf, m_host_clock["code_off"],
+            m_srm_h["regs_size"], m_srm_h["ins_size"], max(m_srm_h["outs_size"], 3), 0, 0, m_host_clock["insns_size"],
+        )
+        buf[m_host_clock["code_off"] + 16 : m_host_clock["code_off"] + 16 + m_host_clock["insns_size"] * 2] = (
+            combined_h + b"\x00\x00" * pad_w
+        )
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_int(0)
+        stub_bytes = stub.assemble(pad_to_words=m_srm_h["insns_size"])
+        struct.pack_into("<4H2I", buf, m_srm_h["code_off"], m_host_clock["ins_size"] + 1, m_host_clock["ins_size"], 0, 0, 0, m_srm_h["insns_size"])
+        buf[m_srm_h["code_off"] + 16 : m_srm_h["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_srm_h["code_pos"] : m_srm_h["code_pos"] + 4] = encode_uleb128_4bytes(m_host_clock["code_off"])
+        buf[m_host_clock["code_pos"] : m_host_clock["code_pos"] + 4] = encode_uleb128_4bytes(m_srm_h["code_off"])
+
+    # 6) SportRunningManager.b(Context, Z)V in-place (+001a..+002c): clear auto-pause flags on resume
+    m_srm_b = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;",
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->b(Landroid/content/Context;Z)V",
+    )
+    b_insns = m_srm_b["code_off"] + 16
+    b_patch = DalvikAssembler()
+    b_patch.invoke_static([], refs["M_MMKV_DEFAULT"])
+    b_patch.move_result_object(4)
+    b_patch.if_eqz(4, "b_clr_done")
+    b_patch.const_string(5, refs["STR_KEY_AUTO_PAUSED"])
+    b_patch.invoke_virtual([4, 5, 2], refs["M_MMKV_ENC_BOOL"])  # v2 is 0 (false)
+    b_patch.const_string(5, refs["STR_KEY_LOW_SINCE"])
+    b_patch.const_wide16(6, 0)
+    b_patch.invoke_virtual([4, 5, 6, 7], refs["M_MMKV_ENC_LONG"])
+    b_patch.label("b_clr_done")
+    b_patch_bytes = b_patch.assemble(pad_to_words=0x2D - 0x1A)
+    assert len(b_patch_bytes) == (0x2D - 0x1A) * 2
+    if bytes(buf[b_insns + 0x1A * 2 : b_insns + 0x2D * 2]) != b_patch_bytes:
+        assert buf[b_insns + 0x1A * 2] == 0x22, "Unexpected bytecode at SportRunningManager.b+001a"
+        buf[b_insns + 0x1A * 2 : b_insns + 0x2D * 2] = b_patch_bytes
+        buf[b_insns + 0x42 * 2 : b_insns + 0x47 * 2] = b"\x00\x00" * 5  # nop dead Log("startLocation")
+
+    # 7) SportRunningManager.onLocationChange(Location)V in-place (+001a..+0033, outside all try blocks)
+    m_on_loc = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;",
+        "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->onLocationChange(Landroid/location/Location;)V",
+        allow_tries=True,
+    )
+    loc_insns = m_on_loc["code_off"] + 16
+    loc_hook = DalvikAssembler()
+    loc_hook.invoke_static_range(33, 1, refs["M_OBJ_HASH"])
+    loc_hook.move_result(0)
+    loc_hook.if_nez(0, "loc_continue")
+    loc_hook.return_void()
+    for _ in range((0x34 - 0x1A) - 7):
+        loc_hook.nop()
+    loc_hook.label("loc_continue")
+    loc_hook_bytes = loc_hook.assemble()
+    assert len(loc_hook_bytes) == (0x34 - 0x1A) * 2
+    if bytes(buf[loc_insns + 0x1A * 2 : loc_insns + 0x34 * 2]) != loc_hook_bytes:
+        assert buf[loc_insns + 0x1A * 2] == 0x63, "Unexpected bytecode at onLocationChange+001a"
+        buf[loc_insns + 0x1A * 2 : loc_insns + 0x34 * 2] = loc_hook_bytes
+
+    # 8) CommonUtil.z(SportTable, Z, String)V in-place (+0146..+018a, inside existing try block):
+    #    run cycling backfill immediately after SportDao.insert
+    m_cz = d6.find_method_info(
+        "Lcom/liesheng/haylou/utils/CommonUtil;",
+        "Lcom/liesheng/haylou/utils/CommonUtil;->z(Lcom/liesheng/lib_room/table/SportTable;ZLjava/lang/String;)V",
+        allow_tries=True,
+    )
+    cz_insns = m_cz["code_off"] + 16
+    cz_hook = DalvikAssembler()
+    cz_hook.invoke_static([], refs["M_GET_CC"])
+    cz_hook.return_void()
+    cz_hook_bytes = cz_hook.assemble(pad_to_words=0x18B - 0x146)
+    if bytes(buf[cz_insns + 0x146 * 2 : cz_insns + 0x18B * 2]) != cz_hook_bytes:
+        assert buf[cz_insns + 0x146 * 2] == 0x1A, "Unexpected bytecode at CommonUtil.z+0146"
+        buf[cz_insns + 0x146 * 2 : cz_insns + 0x18B * 2] = cz_hook_bytes
+
+    # 9) Home IO backfill trigger on SportRecordWidgetDataLoader.f() (runs on Dispatchers.IO on every
+    #    Home open, right before reading SportTable — 100% independent of --vitality-vo2 / --unlock-cards!)
+    m_sr_loader = d6.find_method_info(
+        "Lcom/liesheng/module_home/homeV2/dataloader/SportRecordWidgetDataLoader;",
+        "Lcom/liesheng/module_home/homeV2/dataloader/SportRecordWidgetDataLoader;->f(Lkotlin/coroutines/jvm/internal/SuspendLambda;)Ljava/lang/Object;",
+    )
+    m_host_rec = d6.find_method_info(
+        "Lcom/liesheng/lib_service/bean/SportRecordUiModel;",
+        "Lcom/liesheng/lib_service/bean/SportRecordUiModel;->copy$default(Lcom/liesheng/lib_service/bean/SportRecordUiModel;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JIFLjava/lang/String;IJJIIILjava/lang/String;IIIIIIILjava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;Ljava/lang/Integer;ILjava/lang/Integer;ILjava/lang/Object;)Lcom/liesheng/lib_service/bean/SportRecordUiModel;",
+    )
+    call_cc_seq = struct.pack("<HHH", 0x0071, refs["M_GET_CC"], 0x0000)
+    if m_sr_loader["insns_size"] < 200:
+        assert m_sr_loader["code_pos_len"] == 4 and m_host_rec["code_pos_len"] == 4
+        orig_sr = dex_bytes[m_sr_loader["code_off"] + 16 : m_sr_loader["code_off"] + 16 + m_sr_loader["insns_size"] * 2]
+        combined_sr = call_cc_seq + orig_sr
+        pad_w = m_host_rec["insns_size"] - len(combined_sr) // 2
+        assert pad_w >= 0
+        struct.pack_into(
+            "<4H2I", buf, m_host_rec["code_off"],
+            m_sr_loader["regs_size"], m_sr_loader["ins_size"], m_sr_loader["outs_size"], 0, 0, m_host_rec["insns_size"],
+        )
+        buf[m_host_rec["code_off"] + 16 : m_host_rec["code_off"] + 16 + m_host_rec["insns_size"] * 2] = (
+            combined_sr + b"\x00\x00" * pad_w
+        )
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_sr_loader["insns_size"])
+        struct.pack_into("<4H2I", buf, m_sr_loader["code_off"], m_host_rec["ins_size"] + 1, m_host_rec["ins_size"], 0, 0, 0, m_sr_loader["insns_size"])
+        buf[m_sr_loader["code_off"] + 16 : m_sr_loader["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_sr_loader["code_pos"] : m_sr_loader["code_pos"] + 4] = encode_uleb128_4bytes(m_host_rec["code_off"])
+        buf[m_host_rec["code_pos"] : m_host_rec["code_pos"] + 4] = encode_uleb128_4bytes(m_sr_loader["code_off"])
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes6.dex Cycling Fixes patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 4. classes7.dex — WatchConfig Unlocks + 3-Card Resting Heart Rate UI
 # --------------------------------------------------------------------------- #
 
@@ -1849,6 +3073,7 @@ def build_modded_apk(
     vitality_vo2: bool = True,
     night_raise_to_wake: bool = True,
     night_hours: tuple[tuple[int, int], tuple[int, int]] = ((23, 0), (7, 0)),
+    cycling_fixes: bool = True,
 ) -> str:
     if not os.path.isfile(src_apk):
         print(f"[-] Source APK not found: {src_apk}")
@@ -1869,7 +3094,7 @@ def build_modded_apk(
                 c3 = patch_classes3_night_quickview(c3)
             replacements["classes3.dex"] = c3
 
-        if noclock or vitality_vo2 or night_raise_to_wake:
+        if noclock or vitality_vo2 or night_raise_to_wake or cycling_fixes:
             c6 = zf.read("classes6.dex")
             if noclock:
                 c6 = patch_classes6_sideload(c6, mode=mode)
@@ -1877,6 +3102,8 @@ def build_modded_apk(
                 c6 = patch_classes6_vitality_vo2(c6)
             if night_raise_to_wake:
                 c6 = patch_classes6_night_quickview(c6, night_start=night_hours[0], night_end=night_hours[1])
+            if cycling_fixes:
+                c6 = patch_classes6_cycling_fixes(c6)
             replacements["classes6.dex"] = c6
 
         if unlock_cards or rhr or night_raise_to_wake:
@@ -1930,6 +3157,11 @@ def main():
         default=parse_night_hours("23:00-07:00"),
         help="Default night-off hours for --night-raise-to-wake (default: 23:00-07:00)",
     )
+    parser.add_argument(
+        "--cycling-fixes",
+        action="store_true",
+        help="Cycling phantom-step removal + post-sync GPS moving time/avg speed + live GPS auto-pause/resume",
+    )
     parser.add_argument("--verify-only", metavar="APK", help="Only verify v2/v3 signatures of an existing APK")
     args = parser.parse_args()
 
@@ -1938,16 +3170,20 @@ def main():
         print(f"[+] Verified {args.verify_only}: {ver}")
         return
 
-    any_specific = args.noclock or args.unlock_cards or args.rhr or args.vitality_vo2 or args.night_raise_to_wake
+    any_specific = (
+        args.noclock or args.unlock_cards or args.rhr
+        or args.vitality_vo2 or args.night_raise_to_wake or args.cycling_fixes
+    )
     use_all = args.all or not any_specific
     do_noclock = use_all or args.noclock
     do_unlock = use_all or args.unlock_cards
     do_rhr = use_all or args.rhr
     do_pai_vo2 = use_all or args.vitality_vo2
     do_night_qv = use_all or args.night_raise_to_wake
+    do_cycling = use_all or args.cycling_fixes
 
     out_path = args.out or (
-        DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv) else DEFAULT_OUT_NOCLOCK
+        DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv or do_cycling) else DEFAULT_OUT_NOCLOCK
     )
 
     build_modded_apk(
@@ -1962,6 +3198,7 @@ def main():
         vitality_vo2=do_pai_vo2,
         night_raise_to_wake=do_night_qv,
         night_hours=args.night_hours,
+        cycling_fixes=do_cycling,
     )
 
 
