@@ -14,6 +14,11 @@ Modular patch flags (default: --all):
                   (Day tab + Week/Month/Year tabs, computed from lowest quiet HR window)
   --vitality-vo2  classes6.dex: Computed Vitality Score (PAI) + VO2 Max engines
                   (backfills up to 30 days on Home launch + live update on every BLE HR sync)
+  --night-raise-to-wake
+                  classes3/6/7.dex: Unhide Device Settings -> Do Not Disturb schedule UI
+                  and wire it exclusively to Watch 4S Raise-to-Wake schedule (BLE 0x72),
+                  defaulting to 23:00-07:00 off (07:00-23:00 active) while keeping calls &
+                  notifications active at night.
 """
 
 from __future__ import annotations
@@ -114,6 +119,89 @@ def patch_classes3_dex_fb_bypass(dex_bytes: bytes) -> bytes:
     data[code_off + 16 : code_off + 16 + len(code_units)] = code_units
     out = recompute_dex_checksums(data)
     print(f"[+] classes3.dex patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+def patch_classes3_night_quickview(dex_bytes: bytes) -> bytes:
+    """
+    Hook Lcom/crrepa/h/a;->sendCurrentVolume(I)V in classes3.dex so magic ints
+    with bit 30 set (0x40000000 | (sH<<18) | (sM<<12) | (eH<<6) | eM) dispatch
+    directly to sendQuickViewTime(new CRPPeriodTimeInfo(sH, sM, eH, eM)) (BLE 0x72).
+    Normal volume calls (0..100) execute untouched.
+    """
+    print("[*] Patching classes3.dex (BLE 0x72 sendQuickViewTime dispatcher)...")
+    d3 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    m_scv = d3.find_method_info(
+        "Lcom/crrepa/h/a;",
+        "Lcom/crrepa/h/a;->sendCurrentVolume(I)V",
+    )
+    m_host = d3.find_method_info(
+        "Landroidx/core/graphics/BitmapCompat;",
+        "Landroidx/core/graphics/BitmapCompat;->createScaledBitmap(Landroid/graphics/Bitmap;IILandroid/graphics/Rect;Z)Landroid/graphics/Bitmap;",
+    )
+
+    T_PERIOD = d3.find_idx("type", "Lcom/crrepa/ble/conn/bean/CRPPeriodTimeInfo;")
+    M_PERIOD_INIT = d3.find_idx("method", "Lcom/crrepa/ble/conn/bean/CRPPeriodTimeInfo;-><init>(IIII)V")
+    M_SEND_QV_TIME = d3.find_idx("method", "Lcom/crrepa/h/a;->sendQuickViewTime(Lcom/crrepa/ble/conn/bean/CRPPeriodTimeInfo;)V")
+    M_Z1_A = d3.find_idx("method", "Lcom/crrepa/f/z1;->a(I)[B")
+    M_MF_H = d3.find_idx("method", "Lcom/crrepa/m/f;->h([B)V")
+    F_HA_B = d3.find_idx("field", "Lcom/crrepa/h/a;->b:Lcom/crrepa/m/f;")
+
+    def _build_insns(pad_words: int) -> bytes:
+        # regs=8, ins=2, outs=5 -> p0=v6 (this), p1=v7 (int arg)
+        a = DalvikAssembler()
+        a.const_high16(0, 0x4000)  # 0x40000000 magic bit
+        a.and_int_2addr(0, 7)
+        a.if_eqz(0, "normal_vol")
+
+        a.ushr_int_lit8(1, 7, 18)
+        a.and_int_lit8(1, 1, 0x3F)  # startHour
+        a.ushr_int_lit8(2, 7, 12)
+        a.and_int_lit8(2, 2, 0x3F)  # startMinute
+        a.ushr_int_lit8(3, 7, 6)
+        a.and_int_lit8(3, 3, 0x3F)  # endHour
+        a.and_int_lit8(4, 7, 0x3F)  # endMinute
+
+        a.new_instance(0, T_PERIOD)
+        a.invoke_direct([0, 1, 2, 3, 4], M_PERIOD_INIT)
+        a.invoke_virtual([6, 0], M_SEND_QV_TIME)
+        a.return_void()
+
+        a.label("normal_vol")
+        a.invoke_static([7], M_Z1_A)
+        a.move_result_object(0)
+        a.iget_object(1, 6, F_HA_B)
+        a.invoke_virtual([1, 0], M_MF_H)
+        a.return_void()
+        return a.assemble(pad_to_words=pad_words)
+
+    if m_scv["insns_size"] >= 100:
+        insns = _build_insns(m_scv["insns_size"])
+        struct.pack_into("<4H2I", buf, m_scv["code_off"], 8, 2, 5, 0, 0, m_scv["insns_size"])
+        buf[m_scv["code_off"] + 16 : m_scv["code_off"] + 16 + len(insns)] = insns
+        out = recompute_dex_checksums(buf)
+        print("    [refresh] Updated classes3.dex 0x72 dispatcher in-place.")
+        return out
+
+    assert m_scv["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
+    insns = _build_insns(m_host["insns_size"])
+    struct.pack_into("<4H2I", buf, m_host["code_off"], 8, 2, 5, 0, 0, m_host["insns_size"])
+    buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + len(insns)] = insns
+
+    stub = DalvikAssembler()
+    stub.const4(0, 0)
+    stub.return_object(0)
+    stub_bytes = stub.assemble(pad_to_words=m_scv["insns_size"])
+    struct.pack_into("<4H2I", buf, m_scv["code_off"], m_host["ins_size"] + 1, m_host["ins_size"], 0, 0, 0, m_scv["insns_size"])
+    buf[m_scv["code_off"] + 16 : m_scv["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+
+    buf[m_scv["code_pos"] : m_scv["code_pos"] + 4] = encode_uleb128_4bytes(m_host["code_off"])
+    buf[m_host["code_pos"] : m_host["code_pos"] + 4] = encode_uleb128_4bytes(m_scv["code_off"])
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes3.dex 0x72 dispatcher patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
     return out
 
 
@@ -795,6 +883,555 @@ def patch_classes6_vitality_vo2(dex_bytes: bytes) -> bytes:
     return out
 
 
+def _emit_format_hhmm(
+    a: DalvikAssembler,
+    dst_reg: int,
+    hour: int,
+    minute: int,
+    tmp_sb: int,
+    tmp_val: int,
+    refs: dict,
+) -> None:
+    a.new_instance(tmp_sb, refs["T_SB"])
+    a.invoke_direct([tmp_sb], refs["M_SB_INIT"])
+    if hour < 10:
+        a.const_string(tmp_val, refs["S_ZERO"])
+        a.invoke_virtual([tmp_sb, tmp_val], refs["M_SB_APP_STR"])
+    a.const16(tmp_val, hour)
+    a.invoke_virtual([tmp_sb, tmp_val], refs["M_SB_APP_INT"])
+    a.const_string(tmp_val, refs["S_COLON"])
+    a.invoke_virtual([tmp_sb, tmp_val], refs["M_SB_APP_STR"])
+    if minute < 10:
+        a.const_string(tmp_val, refs["S_ZERO"])
+        a.invoke_virtual([tmp_sb, tmp_val], refs["M_SB_APP_STR"])
+    a.const16(tmp_val, minute)
+    a.invoke_virtual([tmp_sb, tmp_val], refs["M_SB_APP_INT"])
+    a.invoke_virtual([tmp_sb], refs["M_SB_TOSTR"])
+    a.move_result_object(dst_reg)
+
+
+def _emit_parse_hhmm(
+    a: DalvikAssembler,
+    r_str: int,
+    r_h: int,
+    r_m: int,
+    t0: int,
+    t1: int,
+    t4: int,
+    def_h: int,
+    def_m: int,
+    pfx: str,
+    refs: dict,
+) -> None:
+    a.const16(r_h, def_h)
+    a.const16(r_m, def_m)
+    a.if_eqz(r_str, f"{pfx}_done")
+    a.const16(t0, 58)  # ':'
+    a.invoke_virtual([r_str, t0], refs["M_STR_INDEXOF_C"])
+    a.move_result(t0)
+    a.if_lez(t0, f"{pfx}_done")
+    a.invoke_virtual([r_str], refs["M_STR_LEN"])
+    a.move_result(t1)
+    a.add_int_lit8(t4, t0, 1)
+    a.if_ge(t4, t1, f"{pfx}_done")
+
+    a.const4(t1, 0)
+    a.invoke_virtual([r_str, t1, t0], refs["M_STR_SUB2"])
+    a.move_result_object(t1)
+    a.invoke_static([t1], refs["M_INT_PARSE"])
+    a.move_result(r_h)
+
+    a.invoke_virtual([r_str, t4], refs["M_STR_SUB1"])
+    a.move_result_object(t1)
+    a.invoke_static([t1], refs["M_INT_PARSE"])
+    a.move_result(r_m)
+
+    a.if_gez(r_h, f"{pfx}_h_hi")
+    a.const4(r_h, 0)
+    a.label(f"{pfx}_h_hi")
+    a.const16(t0, 24)
+    a.if_le(r_h, t0, f"{pfx}_m_lo")
+    a.move(r_h, t0)
+    a.label(f"{pfx}_m_lo")
+    a.if_gez(r_m, f"{pfx}_m_hi")
+    a.const4(r_m, 0)
+    a.label(f"{pfx}_m_hi")
+    a.const16(t0, 59)
+    a.if_le(r_m, t0, f"{pfx}_chk24")
+    a.move(r_m, t0)
+    a.label(f"{pfx}_chk24")
+    a.const16(t0, 24)
+    a.if_ne(r_h, t0, f"{pfx}_done")
+    a.const4(r_m, 0)
+    a.label(f"{pfx}_done")
+
+
+def _emit_pack_schedule_and_send(
+    a: DalvikAssembler,
+    r_conn: int,
+    r_en: int,
+    r_start: int,
+    r_end: int,
+    tmps: tuple[int, int, int, int, int, int],
+    pfx: str,
+    refs: dict,
+    def_night_start: tuple[int, int],
+    def_night_end: tuple[int, int],
+) -> None:
+    """
+    Invert night-off window [r_start..r_end] into active Raise-to-Wake window
+    [r_end..r_start] (or 00:00..24:00 when r_en == false), pack into magic int
+    0x40000000 | (sH<<18) | (sM<<12) | (eH<<6) | eM, and dispatch via
+    CRPBleConnection.sendCurrentVolume(packed) -> classes3 BLE 0x72 handler.
+    """
+    t0, t1, t2, t3, t4, t5 = tmps
+    a.if_nez(r_en, f"{pfx}_enabled")
+    a.const32(t0, 0x40000000 | (24 << 6))  # 00:00 - 24:00 (Raise-to-Wake always on)
+    a.goto16(f"{pfx}_send")
+
+    a.label(f"{pfx}_enabled")
+    # Active start = night end (e.g. 07:00)
+    _emit_parse_hhmm(a, r_end, t2, t3, t0, t1, t4, def_night_end[0], def_night_end[1], f"{pfx}_s", refs)
+    a.const_high16(t5, 0x4000)
+    a.shl_int_lit8(t0, t2, 18)
+    a.or_int_2addr(t5, t0)
+    a.shl_int_lit8(t0, t3, 12)
+    a.or_int_2addr(t5, t0)
+
+    # Active end = night start (e.g. 23:00)
+    _emit_parse_hhmm(a, r_start, t2, t3, t0, t1, t4, def_night_start[0], def_night_start[1], f"{pfx}_e", refs)
+    # If active end is 00:00 while active start != 00:00 (e.g. night-off 00:00-07:00), map end to 24:00
+    a.if_nez(t2, f"{pfx}_pack_end")
+    a.if_nez(t3, f"{pfx}_pack_end")
+    a.const_high16(t0, 0x4000)
+    a.if_eq(t5, t0, f"{pfx}_pack_end")
+    a.const16(t2, 24)
+
+    a.label(f"{pfx}_pack_end")
+    a.shl_int_lit8(t0, t2, 6)
+    a.or_int_2addr(t5, t0)
+    a.or_int_2addr(t5, t3)
+    a.move(t0, t5)
+
+    a.label(f"{pfx}_send")
+    a.invoke_interface([r_conn, t0], refs["M_CRP_SEND_VOL"])
+
+
+def patch_classes6_night_quickview(
+    dex_bytes: bytes,
+    night_start: tuple[int, int] = (23, 0),
+    night_end: tuple[int, int] = (7, 0),
+) -> bytes:
+    """
+    Wire Haylou Fun's hidden Do Not Disturb schedule screen exclusively to Watch 4S
+    Raise-to-Wake hours (BLE 0x72):
+      1. WatchConfigData.getNoDisturb(): one-time migration of untouched stock default
+         (OFF 12:00-14:00) -> (ON <night_start>-<night_end>, default 23:00-07:00).
+      2. DeviceConfigViewModel.a0(): emit local NoDisturb via FlowKt.flowOf(...) so
+         DoNotDisturbFragment immediately shows the saved schedule on open.
+      3. DeviceConfigViewModel$setNotDisturb$1$1.invokeSuspend(): for CRP watches,
+         dispatch active Raise-to-Wake window via BLE 0x72 and emit Unit so the UI
+         persists the setting locally (does NOT send 0x71 DND — calls/alerts still work).
+      4. CrpWatchControlHelper$syncCurrentTime$1.invokeSuspend(): re-apply the saved
+         0x72 Raise-to-Wake schedule automatically on every BLE connect / time sync.
+    """
+    ns_h, ns_m = night_start
+    ne_h, ne_m = night_end
+    print(
+        f"[*] Patching classes6.dex (Night Raise-to-Wake UI & sync, default off "
+        f"{ns_h:02d}:{ns_m:02d}-{ne_h:02d}:{ne_m:02d} -> active {ne_h:02d}:{ne_m:02d}-{ns_h:02d}:{ns_m:02d})..."
+    )
+    d6 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    refs = {
+        "S_1200": d6.find_idx("string", "12:00"),
+        "S_1400": d6.find_idx("string", "14:00"),
+        "S_2200": d6.find_idx("string", "22:00"),
+        "S_0700": d6.find_idx("string", "07:00"),
+        "S_ZERO": d6.find_idx("string", "0"),
+        "S_COLON": d6.find_idx("string", ":"),
+        "T_SB": d6.find_idx("type", "Ljava/lang/StringBuilder;"),
+        "T_CRP_HELPER": d6.find_idx("type", "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper;"),
+        "T_ND_REQ": d6.find_idx("type", "Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;"),
+        "T_PROD_SCOPE": d6.find_idx("type", "Lkotlinx/coroutines/channels/ProducerScope;"),
+        "F_WCD_ND": d6.find_idx("field", "Lcom/liesheng/lib_common/bean/WatchConfigData;->noDisturb:Lcom/liesheng/lib_common/bean/NoDisturb;"),
+        "F_WDH_INST": d6.find_idx("field", "Lcom/liesheng/lib_common/bean/WatchDataHelper;->INSTANCE:Lcom/liesheng/lib_common/bean/WatchDataHelper;"),
+        "F_CRP_CONN": d6.find_idx("field", "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper;->k:Lcom/crrepa/ble/conn/CRPBleConnection;"),
+        "F_ND11_H": d6.find_idx("field", "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel$setNotDisturb$1$1;->h:Z"),
+        "F_ND11_I": d6.find_idx("field", "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel$setNotDisturb$1$1;->i:Ljava/lang/String;"),
+        "F_ND11_J": d6.find_idx("field", "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel$setNotDisturb$1$1;->j:Ljava/lang/String;"),
+        "F_SYNC_H": d6.find_idx("field", "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$syncCurrentTime$1;->h:Ljava/lang/Object;"),
+        "F_SYNC_I": d6.find_idx("field", "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$syncCurrentTime$1;->i:Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper;"),
+        "F_UNIT": d6.find_idx("field", "Lkotlin/q;->a:Lkotlin/q;"),
+        "M_TEXT_EQ": d6.find_idx("method", "Landroid/text/TextUtils;->equals(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Z"),
+        "M_WDH_GET": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/WatchDataHelper;->getWatchData()Lcom/liesheng/lib_common/bean/WatchConfigData;"),
+        "M_WCD_CFG": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/WatchConfigData;->getWatchConfig()Lcom/yingsheng/protocol/config/WatchConfig;"),
+        "M_WCD_ND": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/WatchConfigData;->getNoDisturb()Lcom/liesheng/lib_common/bean/NoDisturb;"),
+        "M_WC_SYNC_ND": d6.find_idx("method", "Lcom/yingsheng/protocol/config/WatchConfig;->isSupportSyncDeviceDisturb()Z"),
+        "M_ND_IS_EN": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->isEnable()Z"),
+        "M_ND_GET_START": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->getStartTime()Ljava/lang/String;"),
+        "M_ND_GET_END": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->getEndTime()Ljava/lang/String;"),
+        "M_ND_SET_EN": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->setEnable(Z)V"),
+        "M_ND_SET_START": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->setStartTime(Ljava/lang/String;)V"),
+        "M_ND_SET_END": d6.find_idx("method", "Lcom/liesheng/lib_common/bean/NoDisturb;->setEndTime(Ljava/lang/String;)V"),
+        "M_SB_INIT": d6.find_idx("method", "Ljava/lang/StringBuilder;-><init>()V"),
+        "M_SB_APP_INT": d6.find_idx("method", "Ljava/lang/StringBuilder;->append(I)Ljava/lang/StringBuilder;"),
+        "M_SB_APP_STR": d6.find_idx("method", "Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;"),
+        "M_SB_TOSTR": d6.find_idx("method", "Ljava/lang/StringBuilder;->toString()Ljava/lang/String;"),
+        "M_STR_INDEXOF_C": d6.find_idx("method", "Ljava/lang/String;->indexOf(I)I"),
+        "M_STR_LEN": d6.find_idx("method", "Ljava/lang/String;->length()I"),
+        "M_STR_SUB1": d6.find_idx("method", "Ljava/lang/String;->substring(I)Ljava/lang/String;"),
+        "M_STR_SUB2": d6.find_idx("method", "Ljava/lang/String;->substring(II)Ljava/lang/String;"),
+        "M_INT_PARSE": d6.find_idx("method", "Ljava/lang/Integer;->parseInt(Ljava/lang/String;)I"),
+        "M_CRP_SEND_VOL": d6.find_idx("method", "Lcom/crrepa/ble/conn/CRPBleConnection;->sendCurrentVolume(I)V"),
+        "M_CRP_SYNC_TIME": d6.find_idx("method", "Lcom/crrepa/ble/conn/CRPBleConnection;->syncTime()V"),
+        "M_CRP_SEND_TZ": d6.find_idx("method", "Lcom/crrepa/ble/conn/CRPBleConnection;->sendCurrentTimezone()V"),
+        "M_FLOW_OF": d6.find_idx("method", "Lkotlinx/coroutines/flow/FlowKt;->flowOf(Ljava/lang/Object;)Lkotlinx/coroutines/flow/Flow;"),
+        "M_ANIM_C": d6.find_idx("method", "Landroidx/compose/animation/c;->c(Ljava/lang/Object;)Lcom/yingsheng/protocol/business/watch/WatchControlHelper;"),
+        "M_ND_REQ_INIT": d6.find_idx("method", "Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;-><init>()V"),
+        "M_ND_REQ_SET_EN": d6.find_idx("method", "Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;->setEnable(Z)V"),
+        "M_ND_REQ_SET_START": d6.find_idx("method", "Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;->setNoDisturbStartTime(Ljava/lang/String;)V"),
+        "M_ND_REQ_SET_END": d6.find_idx("method", "Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;->setNoDisturbEndTime(Ljava/lang/String;)V"),
+        "M_WCH_SET_ND": d6.find_idx("method", "Lcom/yingsheng/protocol/business/watch/WatchControlHelper;->setNoDisturbModel(Lcom/yingsheng/protocol/business/bean/request/NoDisturbRequest;)Lkotlinx/coroutines/flow/Flow;"),
+        "M_CTRL_GET": d6.find_idx("method", "Lcom/liesheng/haylou/ext/ControlHelperKt;->c()Lcom/yingsheng/protocol/business/watch/WatchControlHelper;"),
+        "M_GET_SUSP": d6.find_idx("method", "Lkotlin/coroutines/intrinsics/IntrinsicsKt;->getCOROUTINE_SUSPENDED()Ljava/lang/Object;"),
+        "M_KOTLIN_GB": d6.find_idx("method", "Lkotlin/g;->b(Ljava/lang/Object;)V"),
+        "M_BOX_BOOL": d6.find_idx("method", "Lkotlin/coroutines/jvm/internal/Boxing;->boxBoolean(Z)Ljava/lang/Boolean;"),
+        "M_TRY_SEND": d6.find_idx("method", "Lkotlinx/coroutines/channels/SendChannel;->trySend-JP2dKIU(Ljava/lang/Object;)Ljava/lang/Object;"),
+        "M_CLOSE_DEF": d6.find_idx("method", "Lkotlinx/coroutines/channels/SendChannel$DefaultImpls;->close$default(Lkotlinx/coroutines/channels/SendChannel;Ljava/lang/Throwable;ILjava/lang/Object;)Z"),
+    }
+
+    def _swap_or_refresh(target_info: dict, host_info: dict, regs: int, ins: int, outs: int, build_fn, swapped_min_words: int):
+        if target_info["insns_size"] >= swapped_min_words:
+            insns = build_fn(target_info["insns_size"])
+            struct.pack_into("<4H2I", buf, target_info["code_off"], regs, ins, outs, 0, 0, target_info["insns_size"])
+            buf[target_info["code_off"] + 16 : target_info["code_off"] + 16 + len(insns)] = insns
+            return False
+        assert target_info["code_pos_len"] == 4 and host_info["code_pos_len"] == 4
+        insns = build_fn(host_info["insns_size"])
+        struct.pack_into("<4H2I", buf, host_info["code_off"], regs, ins, outs, 0, 0, host_info["insns_size"])
+        buf[host_info["code_off"] + 16 : host_info["code_off"] + 16 + len(insns)] = insns
+
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=target_info["insns_size"])
+        struct.pack_into(
+            "<4H2I",
+            buf,
+            target_info["code_off"],
+            host_info["ins_size"] + 1,
+            host_info["ins_size"],
+            0,
+            0,
+            0,
+            target_info["insns_size"],
+        )
+        buf[target_info["code_off"] + 16 : target_info["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+
+        buf[target_info["code_pos"] : target_info["code_pos"] + 4] = encode_uleb128_4bytes(host_info["code_off"])
+        buf[host_info["code_pos"] : host_info["code_pos"] + 4] = encode_uleb128_4bytes(target_info["code_off"])
+        return True
+
+    # 1) WatchConfigData.getNoDisturb(): one-time default upgrade (OFF 12:00-14:00 -> ON night_start-night_end)
+    m_get_nd = d6.find_method_info(
+        "Lcom/liesheng/lib_common/bean/WatchConfigData;",
+        "Lcom/liesheng/lib_common/bean/WatchConfigData;->getNoDisturb()Lcom/liesheng/lib_common/bean/NoDisturb;",
+    )
+    m_host_nd = d6.find_method_info(
+        "Lcom/liesheng/lib_common/bean/UserInfoBean;",
+        "Lcom/liesheng/lib_common/bean/UserInfoBean;->copy$default(Lcom/liesheng/lib_common/bean/UserInfoBean;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;JILjava/lang/String;Ljava/lang/Integer;ILjava/lang/Object;)Lcom/liesheng/lib_common/bean/UserInfoBean;",
+    )
+
+    def _build_get_nd(pad_words: int) -> bytes:
+        # regs=5, ins=1, outs=2 -> p0=v4 (this: WatchConfigData)
+        # One-time upgrade of untouched stock defaults:
+        #   (false, "12:00", "14:00") [NoDisturb.<init>] OR
+        #   (false, "22:00", "07:00") [WatchConfigData.<init>] (unless target itself is 22:00-07:00)
+        # -> (true, defaultNightStart, defaultNightEnd)
+        a = DalvikAssembler()
+        a.iget_object(0, 4, refs["F_WCD_ND"])
+        a.if_eqz(0, "ret_nd")
+        a.invoke_virtual([0], refs["M_ND_IS_EN"])
+        a.move_result(1)
+        a.if_nez(1, "ret_nd")
+
+        # Check ("12:00", "14:00")
+        a.invoke_virtual([0], refs["M_ND_GET_START"])
+        a.move_result_object(1)
+        a.const_string(2, refs["S_1200"])
+        a.invoke_static([1, 2], refs["M_TEXT_EQ"])
+        a.move_result(1)
+        a.if_eqz(1, "chk_2200")
+        a.invoke_virtual([0], refs["M_ND_GET_END"])
+        a.move_result_object(1)
+        a.const_string(2, refs["S_1400"])
+        a.invoke_static([1, 2], refs["M_TEXT_EQ"])
+        a.move_result(1)
+        a.if_nez(1, "do_migrate")
+
+        a.label("chk_2200")
+        if not (ns_h == 22 and ns_m == 0 and ne_h == 7 and ne_m == 0):
+            a.invoke_virtual([0], refs["M_ND_GET_START"])
+            a.move_result_object(1)
+            a.const_string(2, refs["S_2200"])
+            a.invoke_static([1, 2], refs["M_TEXT_EQ"])
+            a.move_result(1)
+            a.if_eqz(1, "ret_nd")
+            a.invoke_virtual([0], refs["M_ND_GET_END"])
+            a.move_result_object(1)
+            a.const_string(2, refs["S_0700"])
+            a.invoke_static([1, 2], refs["M_TEXT_EQ"])
+            a.move_result(1)
+            a.if_eqz(1, "ret_nd")
+        else:
+            a.goto16("ret_nd")
+
+        a.label("do_migrate")
+        a.const4(1, 1)
+        a.invoke_virtual([0, 1], refs["M_ND_SET_EN"])
+        _emit_format_hhmm(a, 1, ns_h, ns_m, 2, 3, refs)
+        a.invoke_virtual([0, 1], refs["M_ND_SET_START"])
+        _emit_format_hhmm(a, 1, ne_h, ne_m, 2, 3, refs)
+        a.invoke_virtual([0, 1], refs["M_ND_SET_END"])
+
+        a.label("ret_nd")
+        a.return_object(0)
+        return a.assemble(pad_to_words=pad_words)
+
+    _swap_or_refresh(m_get_nd, m_host_nd, regs=5, ins=1, outs=2, build_fn=_build_get_nd, swapped_min_words=100)
+
+    # 2) DeviceConfigViewModel.a0(): emit saved local NoDisturb on UI open (in-place at +0035..+004f)
+    m_a0 = d6.find_method_info(
+        "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel;",
+        "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel;->a0(Lkotlin/coroutines/jvm/internal/ContinuationImpl;)Ljava/lang/Object;",
+    )
+    a0_patch = DalvikAssembler()
+    a0_patch.sget_object(2, refs["F_WDH_INST"])
+    a0_patch.invoke_virtual([2], refs["M_WDH_GET"])
+    a0_patch.move_result_object(2)
+    a0_patch.invoke_virtual([2], refs["M_WCD_CFG"])
+    a0_patch.move_result_object(6)
+    a0_patch.invoke_virtual([6], refs["M_WC_SYNC_ND"])
+    a0_patch.move_result(6)
+    a0_patch.if_nez(6, "jump_0050")
+    a0_patch.invoke_virtual([2], refs["M_WCD_ND"])
+    a0_patch.move_result_object(6)
+    a0_patch.invoke_static([6], refs["M_FLOW_OF"])
+    a0_patch.move_result_object(6)
+    a0_patch.return_object(6)
+    a0_patch.nop()
+    a0_patch.nop()
+    a0_patch.label("jump_0050")
+    a0_bytes = a0_patch.assemble()
+    assert len(a0_bytes) == 54, f"Expected 54 bytes for a0 patch, got {len(a0_bytes)}"
+    a0_off = m_a0["code_off"] + 16 + 0x35 * 2
+    cur_a0 = bytes(buf[a0_off : a0_off + 54])
+    if cur_a0 != a0_bytes:
+        assert cur_a0[0] == 0x62 and cur_a0[52:54] == b"\x11\x06", f"Unexpected bytes in a0(): {cur_a0[:8].hex()}"
+        buf[a0_off : a0_off + 54] = a0_bytes
+
+    # 3) DeviceConfigViewModel$setNotDisturb$1$1.invokeSuspend(): send BLE 0x72 & return FlowKt.flowOf(Unit)
+    m_set_nd = d6.find_method_info(
+        "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel$setNotDisturb$1$1;",
+        "Lcom/liesheng/module_device/setting/viewmodel/DeviceConfigViewModel$setNotDisturb$1$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
+    )
+    m_host_set_nd = d6.find_method_info(
+        "Lcom/liesheng/haylou/ui/fatweight/data/WeightRecordEntity;",
+        "Lcom/liesheng/haylou/ui/fatweight/data/WeightRecordEntity;->copy$default(Lcom/liesheng/haylou/ui/fatweight/data/WeightRecordEntity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;FFIFFFFFFFFIILjava/lang/String;JIIFLcom/liesheng/haylou/ui/fatweight/data/WeightScaleEntity;ILjava/lang/Object;)Lcom/liesheng/haylou/ui/fatweight/data/WeightRecordEntity;",
+    )
+
+    def _build_set_nd(pad_words: int) -> bytes:
+        # regs=12, ins=2, outs=3 -> p0=v10 (this), p1=v11 (Object)
+        a = DalvikAssembler()
+        a.invoke_static([11], refs["M_ANIM_C"])
+        a.move_result_object(6)
+        a.if_nez(6, "has_helper")
+        a.const4(0, 0)
+        a.return_object(0)
+
+        a.label("has_helper")
+        a.instance_of(0, 6, refs["T_CRP_HELPER"])
+        a.if_eqz(0, "non_crp")
+        a.check_cast(6, refs["T_CRP_HELPER"])
+        a.iget_object(6, 6, refs["F_CRP_CONN"])
+        a.if_eqz(6, "ret_flow_unit")
+        a.iget_boolean(7, 10, refs["F_ND11_H"])
+        a.iget_object(8, 10, refs["F_ND11_I"])
+        a.iget_object(9, 10, refs["F_ND11_J"])
+        _emit_pack_schedule_and_send(a, 6, 7, 8, 9, (0, 1, 2, 3, 4, 5), "nd", refs, night_start, night_end)
+
+        a.label("ret_flow_unit")
+        a.sget_object(0, refs["F_UNIT"])
+        a.invoke_static([0], refs["M_FLOW_OF"])
+        a.move_result_object(0)
+        a.return_object(0)
+
+        a.label("non_crp")
+        a.new_instance(0, refs["T_ND_REQ"])
+        a.invoke_direct([0], refs["M_ND_REQ_INIT"])
+        a.iget_boolean(1, 10, refs["F_ND11_H"])
+        a.invoke_virtual([0, 1], refs["M_ND_REQ_SET_EN"])
+        a.iget_object(1, 10, refs["F_ND11_I"])
+        a.invoke_virtual([0, 1], refs["M_ND_REQ_SET_START"])
+        a.iget_object(1, 10, refs["F_ND11_J"])
+        a.invoke_virtual([0, 1], refs["M_ND_REQ_SET_END"])
+        a.invoke_virtual([6, 0], refs["M_WCH_SET_ND"])
+        a.move_result_object(0)
+        a.return_object(0)
+        return a.assemble(pad_to_words=pad_words)
+
+    _swap_or_refresh(m_set_nd, m_host_set_nd, regs=12, ins=2, outs=3, build_fn=_build_set_nd, swapped_min_words=100)
+
+    # 4) SportHeartrateStateKt.test()V (265w dead dev scratch method): unified static helper
+    #    applySavedNightQuickView() — reads WatchDataHelper.noDisturb and dispatches BLE 0x72!
+    m_helper = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/bean/SportHeartrateStateKt;",
+        "Lcom/liesheng/hayloufun/sport/bean/SportHeartrateStateKt;->test()V",
+    )
+    a_hlp = DalvikAssembler()
+    # regs=10, ins=0, outs=3 -> v0..v5 tmps, v6=conn, v7=enable, v8=startTime, v9=endTime
+    a_hlp.invoke_static([], refs["M_CTRL_GET"])
+    a_hlp.move_result_object(6)
+    a_hlp.instance_of(0, 6, refs["T_CRP_HELPER"])
+    a_hlp.if_eqz(0, "hlp_done")
+    a_hlp.check_cast(6, refs["T_CRP_HELPER"])
+    a_hlp.iget_object(6, 6, refs["F_CRP_CONN"])
+    a_hlp.if_eqz(6, "hlp_done")
+    a_hlp.sget_object(0, refs["F_WDH_INST"])
+    a_hlp.invoke_virtual([0], refs["M_WDH_GET"])
+    a_hlp.move_result_object(0)
+    a_hlp.invoke_virtual([0], refs["M_WCD_ND"])
+    a_hlp.move_result_object(0)
+    a_hlp.if_eqz(0, "hlp_done")
+    a_hlp.invoke_virtual([0], refs["M_ND_IS_EN"])
+    a_hlp.move_result(7)
+    a_hlp.invoke_virtual([0], refs["M_ND_GET_START"])
+    a_hlp.move_result_object(8)
+    a_hlp.invoke_virtual([0], refs["M_ND_GET_END"])
+    a_hlp.move_result_object(9)
+    _emit_pack_schedule_and_send(a_hlp, 6, 7, 8, 9, (0, 1, 2, 3, 4, 5), "hlp", refs, night_start, night_end)
+    a_hlp.label("hlp_done")
+    a_hlp.return_void()
+    hlp_insns = a_hlp.assemble(pad_to_words=m_helper["insns_size"])
+    struct.pack_into("<4H2I", buf, m_helper["code_off"], 10, 0, 3, 0, 0, m_helper["insns_size"])
+    buf[m_helper["code_off"] + 16 : m_helper["code_off"] + 16 + len(hlp_insns)] = hlp_insns
+
+    def _append_helper_before_return_obj(target_info: dict, host_info: dict, expected_ret_word: int, swapped_min_words: int):
+        """Clone target_info into host_info and insert `invoke-static {}, test()V` right before its final return-object."""
+        if target_info["insns_size"] >= swapped_min_words:
+            return
+        assert target_info["code_pos_len"] == 4 and host_info["code_pos_len"] == 4
+        orig_words = target_info["insns_size"]
+        orig_bytes = dex_bytes[target_info["code_off"] + 16 : target_info["code_off"] + 16 + orig_words * 2]
+        last_word = struct.unpack_from("<H", orig_bytes, (orig_words - 1) * 2)[0]
+        assert last_word == expected_ret_word, f"Expected trailing word 0x{expected_ret_word:04x}, got 0x{last_word:04x}"
+        tail = DalvikAssembler()
+        tail.invoke_static([], m_helper["method_idx"])
+        tail.items.append(("words", [expected_ret_word]))
+        new_bytes = orig_bytes[:-2] + tail.assemble()
+        pad_words = host_info["insns_size"] - len(new_bytes) // 2
+        assert pad_words >= 0, f"Host slot too small ({host_info['insns_size']}w < {len(new_bytes)//2}w)"
+        struct.pack_into(
+            "<4H2I",
+            buf,
+            host_info["code_off"],
+            target_info["regs_size"],
+            target_info["ins_size"],
+            target_info["outs_size"],
+            0,
+            0,
+            host_info["insns_size"],
+        )
+        buf[host_info["code_off"] + 16 : host_info["code_off"] + 16 + host_info["insns_size"] * 2] = (
+            new_bytes + b"\x00\x00" * pad_words
+        )
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=target_info["insns_size"])
+        struct.pack_into(
+            "<4H2I",
+            buf,
+            target_info["code_off"],
+            host_info["ins_size"] + 1,
+            host_info["ins_size"],
+            0,
+            0,
+            0,
+            target_info["insns_size"],
+        )
+        buf[target_info["code_off"] + 16 : target_info["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[target_info["code_pos"] : target_info["code_pos"] + 4] = encode_uleb128_4bytes(host_info["code_off"])
+        buf[host_info["code_pos"] : host_info["code_pos"] + 4] = encode_uleb128_4bytes(target_info["code_off"])
+
+    # 5) CrpWatchControlHelper.initBleParams(): auto-push 0x72 on EVERY BLE connect / reconnect!
+    m_init_ble = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper;",
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper;->initBleParams(Lcom/yingsheng/protocol/business/bean/request/InitBleRequest;Lkotlin/jvm/functions/Function1;)Lkotlinx/coroutines/flow/Flow;",
+    )
+    m_host_init_ble = d6.find_method_info(
+        "Lcom/liesheng/hayloufun/sport/bean/SportNetBean;",
+        "Lcom/liesheng/hayloufun/sport/bean/SportNetBean;->copy$default(Lcom/liesheng/hayloufun/sport/bean/SportNetBean;JLjava/lang/String;IDDILjava/util/List;Ljava/util/List;JJIIIIDIIIIIILjava/util/List;IIILjava/lang/String;IILjava/util/List;Ljava/util/List;IIIIILjava/lang/String;ILjava/lang/String;Ljava/lang/String;IILjava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/Integer;Ljava/lang/Integer;IILjava/lang/Object;)Lcom/liesheng/hayloufun/sport/bean/SportNetBean;",
+    )
+    _append_helper_before_return_obj(m_init_ble, m_host_init_ble, expected_ret_word=0x0711, swapped_min_words=600)
+
+    # 6) CrpWatchControlHelper$setRaiseUpEnable$1.invokeSuspend(): re-apply 0x72 after Raise-to-Wake toggle
+    m_raise = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$setRaiseUpEnable$1;",
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$setRaiseUpEnable$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
+    )
+    m_host_raise = d6.find_method_info(
+        "Lcom/liesheng/lib_room/table/StepDataTable;",
+        "Lcom/liesheng/lib_room/table/StepDataTable;->copy$default(Lcom/liesheng/lib_room/table/StepDataTable;Ljava/util/Date;Ljava/lang/String;IIFFI[II[F[FI[I[I[F[FILjava/lang/Object;)Lcom/liesheng/lib_room/table/StepDataTable;",
+    )
+    _append_helper_before_return_obj(m_raise, m_host_raise, expected_ret_word=0x0311, swapped_min_words=100)
+
+    # 7) CrpWatchControlHelper$syncCurrentTime$1.invokeSuspend(): re-apply 0x72 on manual time sync
+    m_sync = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$syncCurrentTime$1;",
+        "Lcom/liesheng/haylou/service/watch/crp/CrpWatchControlHelper$syncCurrentTime$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
+    )
+    m_host_sync = d6.find_method_info(
+        "Lcom/liesheng/maps/map/HaylouMapOptions;",
+        "Lcom/liesheng/maps/map/HaylouMapOptions;->copy$default(Lcom/liesheng/maps/map/HaylouMapOptions;Ljava/lang/Integer;Ljava/lang/String;Ljava/lang/Float;Ljava/lang/Float;Lcom/liesheng/maps/map/HaylouCameraOptions;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;ILjava/lang/Object;)Lcom/liesheng/maps/map/HaylouMapOptions;",
+    )
+
+    def _build_sync(pad_words: int) -> bytes:
+        # regs=4, ins=2, outs=4 -> p0=v2 (this), p1=v3 (Object)
+        a = DalvikAssembler()
+        a.invoke_static([], refs["M_GET_SUSP"])
+        a.invoke_static([3], refs["M_KOTLIN_GB"])
+        a.iget_object(3, 2, refs["F_SYNC_H"])
+        a.check_cast(3, refs["T_PROD_SCOPE"])
+        a.iget_object(0, 2, refs["F_SYNC_I"])
+        a.iget_object(1, 0, refs["F_CRP_CONN"])
+        a.if_eqz(1, "after_sync_t")
+        a.invoke_interface([1], refs["M_CRP_SYNC_TIME"])
+        a.label("after_sync_t")
+        a.iget_object(0, 0, refs["F_CRP_CONN"])
+        a.if_eqz(0, "after_tz")
+        a.invoke_interface([0], refs["M_CRP_SEND_TZ"])
+        a.invoke_static([], m_helper["method_idx"])
+        a.label("after_tz")
+        a.const4(0, 1)
+        a.invoke_static([0], refs["M_BOX_BOOL"])
+        a.move_result_object(1)
+        a.invoke_interface([3, 1], refs["M_TRY_SEND"])
+        a.const4(1, 0)
+        a.invoke_static([3, 1, 0, 1], refs["M_CLOSE_DEF"])
+        a.sget_object(3, refs["F_UNIT"])
+        a.return_object(3)
+        return a.assemble(pad_to_words=pad_words)
+
+    _swap_or_refresh(m_sync, m_host_sync, regs=4, ins=2, outs=4, build_fn=_build_sync, swapped_min_words=100)
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes6.dex Night Raise-to-Wake patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # 4. classes7.dex — WatchConfig Unlocks + 3-Card Resting Heart Rate UI
 # --------------------------------------------------------------------------- #
@@ -820,6 +1457,29 @@ def patch_classes7_unlock_cards(dex_bytes: bytes) -> bytes:
 
     out = recompute_dex_checksums(buf)
     print(f"[+] classes7.dex WatchConfig unlocks complete ({unlocked} newly applied)")
+    return out
+
+
+def patch_classes7_night_quickview(dex_bytes: bytes) -> bytes:
+    """Unhide the Device Settings -> Do Not Disturb menu item on Watch 4S."""
+    print("[*] Patching classes7.dex (Unhide Do Not Disturb schedule menu)...")
+    d7 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+    patched_false = bytes([0x12, 0x00, 0x0F, 0x00, 0x00, 0x00])  # const/4 v0, 0; return v0; nop
+
+    info = d7.find_method_info(
+        "Lcom/yingsheng/protocol/config/WatchConfig;",
+        "Lcom/yingsheng/protocol/config/WatchConfig;->isHiddenNoDisturbMenu()Z",
+    )
+    insns_off = info["code_off"] + 16
+    cur = bytes(buf[insns_off : insns_off + 6])
+    if cur == patched_false:
+        print("    [skip] Do Not Disturb menu already unhidden")
+        return bytes(buf)
+    assert cur[0] == 0x55 and cur[4:6] == b"\x0f\x00", f"Unexpected bytes for isHiddenNoDisturbMenu: {cur.hex()}"
+    buf[insns_off : insns_off + 6] = patched_false
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes7.dex Do Not Disturb menu unhidden (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
     return out
 
 
@@ -1160,6 +1820,23 @@ def patch_classes7_rhr(dex_bytes: bytes) -> bytes:
 # Main Builder
 # --------------------------------------------------------------------------- #
 
+def parse_night_hours(spec: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Parse 'HH:MM-HH:MM' (default '23:00-07:00') into ((startH, startM), (endH, endM))."""
+    parts = spec.strip().split("-")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"Invalid --night-hours {spec!r}; expected HH:MM-HH:MM (e.g. 23:00-07:00)")
+    out = []
+    for p in parts:
+        hm = p.strip().split(":")
+        if len(hm) != 2:
+            raise argparse.ArgumentTypeError(f"Invalid time {p!r} in --night-hours; expected HH:MM")
+        h, m = int(hm[0]), int(hm[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise argparse.ArgumentTypeError(f"Time out of range {p!r} in --night-hours (00:00..23:59)")
+        out.append((h, m))
+    return out[0], out[1]
+
+
 def build_modded_apk(
     src_apk: str,
     out_apk: str,
@@ -1170,6 +1847,8 @@ def build_modded_apk(
     unlock_cards: bool = True,
     rhr: bool = True,
     vitality_vo2: bool = True,
+    night_raise_to_wake: bool = True,
+    night_hours: tuple[tuple[int, int], tuple[int, int]] = ((23, 0), (7, 0)),
 ) -> str:
     if not os.path.isfile(src_apk):
         print(f"[-] Source APK not found: {src_apk}")
@@ -1181,22 +1860,33 @@ def build_modded_apk(
     with zipfile.ZipFile(src_apk, "r") as zf:
         if noclock:
             replacements["classes.dex"] = patch_classes_dex_noclock(zf.read("classes.dex"))
-            replacements["classes3.dex"] = patch_classes3_dex_fb_bypass(zf.read("classes3.dex"))
 
-        if noclock or vitality_vo2:
+        if noclock or night_raise_to_wake:
+            c3 = zf.read("classes3.dex")
+            if noclock:
+                c3 = patch_classes3_dex_fb_bypass(c3)
+            if night_raise_to_wake:
+                c3 = patch_classes3_night_quickview(c3)
+            replacements["classes3.dex"] = c3
+
+        if noclock or vitality_vo2 or night_raise_to_wake:
             c6 = zf.read("classes6.dex")
             if noclock:
                 c6 = patch_classes6_sideload(c6, mode=mode)
             if vitality_vo2:
                 c6 = patch_classes6_vitality_vo2(c6)
+            if night_raise_to_wake:
+                c6 = patch_classes6_night_quickview(c6, night_start=night_hours[0], night_end=night_hours[1])
             replacements["classes6.dex"] = c6
 
-        if unlock_cards or rhr:
+        if unlock_cards or rhr or night_raise_to_wake:
             c7 = zf.read("classes7.dex")
             if unlock_cards:
                 c7 = patch_classes7_unlock_cards(c7)
             if rhr:
                 c7 = patch_classes7_rhr(c7)
+            if night_raise_to_wake:
+                c7 = patch_classes7_night_quickview(c7)
             replacements["classes7.dex"] = c7
 
     print(f"[*] Repackaging, 4B/4KB-aligning, and v2/v3 signing -> {out_apk} (100% pure Python)...")
@@ -1229,6 +1919,17 @@ def main():
     parser.add_argument("--unlock-cards", action="store_true", help="Unlock hidden WatchConfig features (PAI, VO2 Max, HRV, Quick Reply)")
     parser.add_argument("--rhr", action="store_true", help="Add 3rd Resting Heart Rate card to Heart Rate Details")
     parser.add_argument("--vitality-vo2", action="store_true", help="Add computed Vitality Score (PAI) + VO2 Max engines")
+    parser.add_argument(
+        "--night-raise-to-wake",
+        action="store_true",
+        help="Unhide Night Schedule (Do Not Disturb) UI and wire it exclusively to Watch 4S Raise-to-Wake (BLE 0x72)",
+    )
+    parser.add_argument(
+        "--night-hours",
+        type=parse_night_hours,
+        default=parse_night_hours("23:00-07:00"),
+        help="Default night-off hours for --night-raise-to-wake (default: 23:00-07:00)",
+    )
     parser.add_argument("--verify-only", metavar="APK", help="Only verify v2/v3 signatures of an existing APK")
     args = parser.parse_args()
 
@@ -1237,14 +1938,17 @@ def main():
         print(f"[+] Verified {args.verify_only}: {ver}")
         return
 
-    any_specific = args.noclock or args.unlock_cards or args.rhr or args.vitality_vo2
+    any_specific = args.noclock or args.unlock_cards or args.rhr or args.vitality_vo2 or args.night_raise_to_wake
     use_all = args.all or not any_specific
     do_noclock = use_all or args.noclock
     do_unlock = use_all or args.unlock_cards
     do_rhr = use_all or args.rhr
     do_pai_vo2 = use_all or args.vitality_vo2
+    do_night_qv = use_all or args.night_raise_to_wake
 
-    out_path = args.out or (DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2) else DEFAULT_OUT_NOCLOCK)
+    out_path = args.out or (
+        DEFAULT_OUT_FULL if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv) else DEFAULT_OUT_NOCLOCK
+    )
 
     build_modded_apk(
         src_apk=args.src,
@@ -1256,6 +1960,8 @@ def main():
         unlock_cards=do_unlock,
         rhr=do_rhr,
         vitality_vo2=do_pai_vo2,
+        night_raise_to_wake=do_night_qv,
+        night_hours=args.night_hours,
     )
 
 

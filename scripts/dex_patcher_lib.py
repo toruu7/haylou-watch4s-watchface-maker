@@ -242,6 +242,10 @@ class DalvikAssembler:
         u = val & 0xFFFFFFFF
         self.items.append(("words", [0x14 | (dst << 8), u & 0xFFFF, u >> 16]))
 
+    def const_high16(self, dst: int, hi16: int):
+        assert 0 <= dst < 256
+        self.items.append(("words", [0x15 | (dst << 8), hi16 & 0xFFFF]))
+
     def const_wide16(self, dst: int, val: int):
         assert 0 <= dst < 256 and -32768 <= val <= 32767
         self.items.append(("words", [0x16 | (dst << 8), val & 0xFFFF]))
@@ -298,6 +302,14 @@ class DalvikAssembler:
         assert all(0 <= x < 256 for x in (src, arr, idx))
         self.items.append(("words", [0x4D | (src << 8), arr | (idx << 8)]))
 
+    def iget_object(self, dst: int, obj: int, field_idx: int):
+        assert 0 <= dst < 16 and 0 <= obj < 16 and 0 <= field_idx < 65536
+        self.items.append(("words", [0x54 | ((dst | (obj << 4)) << 8), field_idx]))
+
+    def iget_boolean(self, dst: int, obj: int, field_idx: int):
+        assert 0 <= dst < 16 and 0 <= obj < 16 and 0 <= field_idx < 65536
+        self.items.append(("words", [0x55 | ((dst | (obj << 4)) << 8), field_idx]))
+
     def sget_object(self, dst: int, field_idx: int):
         assert 0 <= dst < 256 and 0 <= field_idx < 65536
         self.items.append(("words", [0x62 | (dst << 8), field_idx]))
@@ -321,6 +333,14 @@ class DalvikAssembler:
     def div_int_2addr(self, dst: int, src: int):
         assert 0 <= dst < 16 and 0 <= src < 16
         self.items.append(("words", [0xB3 | ((dst | (src << 4)) << 8)]))
+
+    def and_int_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xB5 | ((dst | (src << 4)) << 8)]))
+
+    def or_int_2addr(self, dst: int, src: int):
+        assert 0 <= dst < 16 and 0 <= src < 16
+        self.items.append(("words", [0xB6 | ((dst | (src << 4)) << 8)]))
 
     def add_long_2addr(self, dst: int, src: int):
         assert 0 <= dst < 16 and 0 <= src < 16
@@ -349,6 +369,18 @@ class DalvikAssembler:
     def div_int_lit8(self, dst: int, src: int, lit: int):
         assert 0 <= dst < 256 and 0 <= src < 256 and -128 <= lit <= 127
         self.items.append(("words", [0xDB | (dst << 8), src | ((lit & 0xFF) << 8)]))
+
+    def and_int_lit8(self, dst: int, src: int, lit: int):
+        assert 0 <= dst < 256 and 0 <= src < 256 and -128 <= lit <= 127
+        self.items.append(("words", [0xDD | (dst << 8), src | ((lit & 0xFF) << 8)]))
+
+    def shl_int_lit8(self, dst: int, src: int, lit: int):
+        assert 0 <= dst < 256 and 0 <= src < 256 and 0 <= lit <= 31
+        self.items.append(("words", [0xE0 | (dst << 8), src | ((lit & 0xFF) << 8)]))
+
+    def ushr_int_lit8(self, dst: int, src: int, lit: int):
+        assert 0 <= dst < 256 and 0 <= src < 256 and 0 <= lit <= 31
+        self.items.append(("words", [0xE2 | (dst << 8), src | ((lit & 0xFF) << 8)]))
 
     def goto16(self, target: str):
         self.items.append(("branch20t", 0x29, target))
