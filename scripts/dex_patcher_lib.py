@@ -495,6 +495,10 @@ class DalvikAssembler:
         assert 0 <= dst < 256 and 0 <= src < 256 and -128 <= lit <= 127
         self.items.append(("words", [0xDB | (dst << 8), src | ((lit & 0xFF) << 8)]))
 
+    def rem_int_lit8(self, dst: int, src: int, lit: int):
+        assert 0 <= dst < 256 and 0 <= src < 256 and -128 <= lit <= 127
+        self.items.append(("words", [0xDC | (dst << 8), src | ((lit & 0xFF) << 8)]))
+
     def and_int_lit8(self, dst: int, src: int, lit: int):
         assert 0 <= dst < 256 and 0 <= src < 256 and -128 <= lit <= 127
         self.items.append(("words", [0xDD | (dst << 8), src | ((lit & 0xFF) << 8)]))
