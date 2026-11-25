@@ -38,6 +38,10 @@ Modular patch flags (default: --all):
   --hrv-active    classes6/7.dex: Stress-derived 30-min HRV engine (HrvTable from Watch 4S's
                   24/7 PPG Stress + quiet HR) and Hourly Active/Standing Hours engine
                   (StepDataTable.activeItems[24], 30-day backfill + live refresh).
+  --hourly-charts classes3/5/6/7.dex: Unlock Watch 4S's native 30-min hardware step histogram
+                  (BLE 0x59 queryStepsCategory), populate hourly Steps/Calories/Exercise arrays
+                  (with cycling-step reconciliation & workout allocation), and unhide the Day (D)
+                  tabs & hourly bar charts in Daily Activities, Steps, Calories, and Home cards.
 """
 
 from __future__ import annotations
@@ -237,6 +241,177 @@ def patch_classes3_night_quickview(dex_bytes: bytes) -> bytes:
 
     out = recompute_dex_checksums(buf)
     print(f"[+] classes3.dex 0x72 dispatcher patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+def patch_classes3_hourly_charts(dex_bytes: bytes) -> bytes:
+    """
+    Hook Lcom/crrepa/h/a;->syncStep()V in classes3.dex (swapped into unused
+    queryPerformanceInsights()V, 83 words) so every Watch 4S step sync also sends
+    queryStepsCategory(CRPCategoryHistoryDay.TODAY) (BLE 0x59 00 / 0x59 01), pulling
+    Watch 4S's native 48 half-hour hardware step histogram.
+    """
+    print("[*] Patching classes3.dex (BLE 0x59 queryStepsCategory on syncStep)...")
+    d3 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    m_sync = d3.find_method_info("Lcom/crrepa/h/a;", "Lcom/crrepa/h/a;->syncStep()V")
+    m_host = d3.find_method_info("Lcom/crrepa/h/a;", "Lcom/crrepa/h/a;->queryPerformanceInsights()V")
+    F_TODAY = d3.find_idx("field", "Lcom/crrepa/ble/conn/type/CRPCategoryHistoryDay;->TODAY:Lcom/crrepa/ble/conn/type/CRPCategoryHistoryDay;")
+    M_QSC = d3.find_idx("method", "Lcom/crrepa/h/a;->queryStepsCategory(Lcom/crrepa/ble/conn/type/CRPCategoryHistoryDay;)V")
+    F_HA_B = d3.find_idx("field", "Lcom/crrepa/h/a;->b:Lcom/crrepa/m/f;")
+    M_MF_C = d3.find_idx("method", "Lcom/crrepa/m/f;->c()V")
+
+    def _build_sync(pad_words: int) -> bytes:
+        # regs=2, ins=1, outs=2 -> p0=v1 (this), v0=tmp
+        a = DalvikAssembler()
+        a.iget_object(0, 1, F_HA_B)
+        a.invoke_virtual([0], M_MF_C)
+        a.sget_object(0, F_TODAY)
+        a.invoke_virtual([1, 0], M_QSC)
+        a.return_void()
+        return a.assemble(pad_to_words=pad_words)
+
+    if m_sync["insns_size"] >= 50:
+        insns = _build_sync(m_sync["insns_size"])
+        struct.pack_into("<4H2I", buf, m_sync["code_off"], 2, 1, 2, 0, 0, m_sync["insns_size"])
+        buf[m_sync["code_off"] + 16 : m_sync["code_off"] + 16 + len(insns)] = insns
+        out = recompute_dex_checksums(buf)
+        print("    [refresh] Updated classes3.dex 0x59 queryStepsCategory hook in-place.")
+        return out
+
+    assert m_sync["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
+    insns = _build_sync(m_host["insns_size"])
+    struct.pack_into("<4H2I", buf, m_host["code_off"], 2, 1, 2, 0, 0, m_host["insns_size"])
+    buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + len(insns)] = insns
+
+    stub = DalvikAssembler()
+    stub.return_void()
+    stub_bytes = stub.assemble(pad_to_words=m_sync["insns_size"])
+    struct.pack_into("<4H2I", buf, m_sync["code_off"], 1, 1, 0, 0, 0, m_sync["insns_size"])
+    buf[m_sync["code_off"] + 16 : m_sync["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+
+    buf[m_sync["code_pos"] : m_sync["code_pos"] + 4] = encode_uleb128_4bytes(m_host["code_off"])
+    buf[m_host["code_pos"] : m_host["code_pos"] + 4] = encode_uleb128_4bytes(m_sync["code_off"])
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes3.dex 0x59 queryStepsCategory patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 2b. classes5.dex — Capture Watch 4S 0x59 30-Min Hardware Steps (--hourly-charts)
+# --------------------------------------------------------------------------- #
+
+def patch_classes5_hourly_charts(dex_bytes: bytes) -> bytes:
+    """
+    Hook Lcom/google/common/collect/e1;->onStepsCategoryChange(CRPStepsCategoryInfo)V
+    (swapped into unused HuaWo AiDeviceInfo.toString(), 150 words) so when Watch 4S replies
+    to BLE 0x59 with its 48 half-hour hardware step counts, the raw CRPStepsCategoryInfo string
+    and timestamp are cached in SharedPreferences("CRPSDK") for classes6.dex to ingest cleanly.
+    """
+    print("[*] Patching classes5.dex (Capture BLE 0x59 StepsCategory into SharedPreferences)...")
+    d5 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    m_e1 = d5.find_method_info(
+        "Lcom/google/common/collect/e1;",
+        "Lcom/google/common/collect/e1;->onStepsCategoryChange(Lcom/crrepa/ble/conn/bean/CRPStepsCategoryInfo;)V",
+    )
+    m_host = d5.find_method_info(
+        "Lcom/huawo/ai/handler/model/AiDeviceInfo;",
+        "Lcom/huawo/ai/handler/model/AiDeviceInfo;->toString()Ljava/lang/String;",
+    )
+
+    T_SB = d5.find_idx("type", "Ljava/lang/StringBuilder;")
+    M_SB_INIT = d5.find_idx("method", "Ljava/lang/StringBuilder;-><init>(Ljava/lang/String;)V")
+    M_SB_APP_OBJ = d5.find_idx("method", "Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;")
+    M_SB_APP_STR = d5.find_idx("method", "Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;")
+    M_SB_TOSTR = d5.find_idx("method", "Ljava/lang/StringBuilder;->toString()Ljava/lang/String;")
+    M_LOG_K = d5.find_idx("method", "Lj2/f;->k(Ljava/lang/String;Ljava/lang/String;)V")
+    M_OBJ_TOSTR = d5.find_idx("method", "Ljava/lang/Object;->toString()Ljava/lang/String;")
+    M_HYAPP_CTX = d5.find_idx("method", "Lcom/liesheng/haylou/app/HyApplication;->getContext()Lcom/liesheng/haylou/app/HyApplication;")
+    M_GET_SP = d5.find_idx("method", "Landroid/content/Context;->getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;")
+    M_SP_EDIT = d5.find_idx("method", "Landroid/content/SharedPreferences;->edit()Landroid/content/SharedPreferences$Editor;")
+    M_ED_PUT_STR = d5.find_idx("method", "Landroid/content/SharedPreferences$Editor;->putString(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;")
+    M_ED_PUT_LONG = d5.find_idx("method", "Landroid/content/SharedPreferences$Editor;->putLong(Ljava/lang/String;J)Landroid/content/SharedPreferences$Editor;")
+    M_ED_APPLY = d5.find_idx("method", "Landroid/content/SharedPreferences$Editor;->apply()V")
+    M_SYS_TIME = d5.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J")
+    STR_PREFIX = d5.find_idx("string", "onStepsCategoryChange ")
+    STR_SPACE = d5.find_idx("string", " ")
+    STR_CRPSDK = d5.find_idx("string", "CRPSDK")
+    STR_STEPS = d5.find_idx("string", "steps")
+    STR_TIME = d5.find_idx("string", "time")
+
+    def _build_e1(pad_words: int) -> bytes:
+        # regs=7, ins=2, outs=4 -> p0=v5 (this), p1=v6 (CRPStepsCategoryInfo)
+        a = DalvikAssembler()
+        # Keep stock CRPSDK log call
+        a.new_instance(0, T_SB)
+        a.const_string(1, STR_PREFIX)
+        a.invoke_direct([0, 1], M_SB_INIT)
+        a.invoke_virtual([0, 6], M_SB_APP_OBJ)
+        a.const_string(1, STR_SPACE)
+        a.invoke_virtual([0, 1], M_SB_APP_STR)
+        a.invoke_virtual([0], M_SB_TOSTR)
+        a.move_result_object(0)
+        a.const_string(1, STR_CRPSDK)
+        a.invoke_static([1, 0], M_LOG_K)
+
+        # Save info.toString() + timestamp into SharedPreferences("CRPSDK")
+        a.if_eqz(6, "e1_done")
+        a.invoke_virtual([6], M_OBJ_TOSTR)
+        a.move_result_object(4)
+        a.if_eqz(4, "e1_done")
+        a.invoke_static([], M_HYAPP_CTX)
+        a.move_result_object(0)
+        a.if_eqz(0, "e1_done")
+        a.const_string(1, STR_CRPSDK)
+        a.const4(2, 0)
+        a.invoke_virtual([0, 1, 2], M_GET_SP)
+        a.move_result_object(0)
+        a.if_eqz(0, "e1_done")
+        a.invoke_interface([0], M_SP_EDIT)
+        a.move_result_object(0)
+        a.if_eqz(0, "e1_done")
+        a.const_string(1, STR_STEPS)
+        a.invoke_interface([0, 1, 4], M_ED_PUT_STR)
+        a.move_result_object(0)
+        a.const_string(1, STR_TIME)
+        a.invoke_static([], M_SYS_TIME)
+        a.move_result_wide(2)
+        a.invoke_interface([0, 1, 2, 3], M_ED_PUT_LONG)
+        a.move_result_object(0)
+        a.invoke_interface([0], M_ED_APPLY)
+        a.label("e1_done")
+        a.return_void()
+        return a.assemble(pad_to_words=pad_words)
+
+    if m_e1["insns_size"] >= 100:
+        insns = _build_e1(m_e1["insns_size"])
+        struct.pack_into("<4H2I", buf, m_e1["code_off"], 7, 2, 4, 0, 0, m_e1["insns_size"])
+        buf[m_e1["code_off"] + 16 : m_e1["code_off"] + 16 + len(insns)] = insns
+        out = recompute_dex_checksums(buf)
+        print("    [refresh] Updated classes5.dex StepsCategory capture in-place.")
+        return out
+
+    assert m_e1["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
+    insns = _build_e1(m_host["insns_size"])
+    struct.pack_into("<4H2I", buf, m_host["code_off"], 7, 2, 4, 0, 0, m_host["insns_size"])
+    buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + len(insns)] = insns
+
+    stub = DalvikAssembler()
+    stub.const4(0, 0)
+    stub.return_object(0)
+    stub_bytes = stub.assemble(pad_to_words=m_e1["insns_size"])
+    struct.pack_into("<4H2I", buf, m_e1["code_off"], 2, 1, 0, 0, 0, m_e1["insns_size"])
+    buf[m_e1["code_off"] + 16 : m_e1["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+
+    buf[m_e1["code_pos"] : m_e1["code_pos"] + 4] = encode_uleb128_4bytes(m_host["code_off"])
+    buf[m_host["code_pos"] : m_host["code_pos"] + 4] = encode_uleb128_4bytes(m_e1["code_off"])
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes5.dex StepsCategory capture patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
     return out
 
 
@@ -1526,7 +1701,9 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
     a.move_result_wide(0)
     a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
-    a.move_result_wide(18)  # v18,v19 = localMidMs
+    a.move_result_wide(0)
+    a.invoke_static([0, 1], refs["M_UTC_TO_LOCAL"])
+    a.move_result_wide(18)  # v18,v19 = true localMidMs
 
     a.sget_object(0, refs["F_APPDB_A"])
     a.invoke_virtual([0], refs["M_APPDB_B"])
@@ -2003,9 +2180,11 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
     a.move_result_wide(21)
 
-    # localMidMs (v19,v20) = ktx/c.b(chinaMidMs)
+    # localMidMs (v19,v20) = ktx/c.g(ktx/c.b(chinaMidMs))
     a.move_wide(0, 21)
     a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
+    a.move_result_wide(0)
+    a.invoke_static([0, 1], refs["M_UTC_TO_LOCAL"])
     a.move_result_wide(19)
 
     # sports (v18) = SportDao.getSportDataByDate(localMidMs, localMidMs + 86400000L)
@@ -2401,6 +2580,7 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
         "M_IDATA_Z": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->z(J)Ljava/util/Date;"),
         "M_IDATA_J": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->J(Lcom/yingsheng/protocol/data/bean/RealStepData;)V"),
         "M_CHINA_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->b(J)J"),
+        "M_UTC_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->g(J)J"),
         "M_STM_MAIN_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->getMainTypeByType(I)I"),
         "M_SPORT_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getType()I"),
         "M_SPORT_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDuration()I"),
@@ -3921,6 +4101,7 @@ def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
         "M_SPORT_SET_MAXMET": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMaxMet(I)V"),
         "M_IDATA_Z": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->z(J)Ljava/util/Date;"),
         "M_CHINA_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->b(J)J"),
+        "M_UTC_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->g(J)J"),
         "M_DATE_GET_TIME": d6.find_idx("method", "Ljava/util/Date;->getTime()J"),
         "M_SYS_TIME": d6.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J"),
         "M_LIST_SIZE": d6.find_idx("method", "Ljava/util/List;->size()I"),
@@ -4486,8 +4667,1083 @@ def patch_classes6_hrv_active(dex_bytes: bytes) -> bytes:
 
 
 # --------------------------------------------------------------------------- #
+# 3h. classes6.dex — Hourly Steps, Calories & Exercise Charts (--hourly-charts)
+# --------------------------------------------------------------------------- #
+
+def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
+    """
+    Build Lcom/liesheng/module_device/CustomCameraActivity;->start(Landroid/content/Context;)V
+    (swapped into NadalWatchControlHelper$sendMsgToDevice$1.invokeSuspend(Object), 1244 words,
+    regs=32, ins=1, outs=6, p0=v31 unused Context).
+
+    Walks the last 30 days (idempotently) and populates StepDataTable hourly charts for Watch 4S:
+      1) Hourly Exercise Minutes (sportTimeItems[24]) from exact synced SportTable workout
+         intervals (splitting accurately across hour boundaries) + any remaining watch totalDur.
+      2) Hourly Steps (items[24]):
+           - Today (dayOffset==0): ingests Watch 4S's REAL 48 half-hour hardware step histogram
+             from BLE 0x59 (cached in SharedPreferences("CRPSDK") by classes5.dex), collapses to
+             24 hours, deducts stripped cycling phantom steps (baseSteps) from cycling hours, and
+             reconciles cleanly with StepDataTable.totalSteps.
+           - Past days (or before 0x59 arrives): preserves any previously saved non-zero 24-hour
+             hardware items[]; otherwise distributes totalSteps across waking active hours weighted
+             by Watch 4S's real 10-min HR elevation (excluding cycling hours).
+      3) Hourly Calories (kcalItems[24]): allocates real SportTable workout calories into exact
+         workout hours and distributes remaining daily totalKcal proportionally across hourly steps.
+    """
+    a = DalvikAssembler()
+
+    # Load StepDataDao (v30), SportDao (v29), HeartRateDataDao (v28), nowMs (v26,v27)
+    a.sget_object(0, refs["F_APPDB_A"])
+    a.invoke_virtual([0], refs["M_APPDB_B"])
+    a.move_result_object(0)
+    a.invoke_virtual([0], refs["M_APPDB_STEP_DAO"])
+    a.move_result_object(1)
+    a.move_object(30, 1)
+    a.invoke_virtual([0], refs["M_APPDB_SPORT_DAO"])
+    a.move_result_object(1)
+    a.move_object(29, 1)
+    a.invoke_virtual([0], refs["M_APPDB_HR_DAO"])
+    a.move_result_object(1)
+    a.move_object(28, 1)
+    a.invoke_static([], refs["M_SYS_TIME"])
+    a.move_result_wide(26)
+
+    a.const16(25, 0)  # dayOffset = 0..29
+    a.label("hc_day_loop")
+    a.move(0, 25)
+    a.const16(1, 30)
+    a.if_ge(0, 1, "hc_done")
+
+    # chinaMidMs (v23,v24), localMidMs (v21,v22)
+    a.int_to_long(0, 0)
+    a.const_wide32(2, 86400000)
+    a.mul_long_2addr(0, 2)
+    a.move_wide(2, 26)
+    a.sub_long_2addr(2, 0)
+    a.invoke_static([2, 3], refs["M_IDATA_Z"])
+    a.move_result_object(0)
+    a.if_eqz(0, "hc_day_next")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(23)
+    a.move_wide(0, 23)
+    a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
+    a.move_result_wide(0)
+    a.invoke_static([0, 1], refs["M_UTC_TO_LOCAL"])
+    a.move_result_wide(21)
+
+    # Fetch StepDataTable (v20)
+    a.move_object(0, 30)
+    a.move_wide(1, 23)
+    a.invoke_interface([0, 1, 2], refs["M_STEP_BY_DATE"])
+    a.move_result_object(20)
+    a.if_eqz(20, "hc_day_next")
+
+    # Allocate float[24] stArr (v19), wKcal (v18), cycMin (v17), int[24] stepArr (v16), float[24] kcalArr (v15)
+    a.const16(1, 24)
+    a.new_array(0, 1, refs["T_FLOAT_ARR"])
+    a.move_object(19, 0)
+    a.new_array(0, 1, refs["T_FLOAT_ARR"])
+    a.move_object(18, 0)
+    a.new_array(0, 1, refs["T_FLOAT_ARR"])
+    a.move_object(17, 0)
+    a.new_array(0, 1, refs["T_INT_ARR"])
+    a.move_object(16, 0)
+    a.new_array(15, 1, refs["T_FLOAT_ARR"])
+
+    # Fetch HeartRateDataTable (v14) & dayRhr (v13, default 62, clamped 45..85)
+    a.const16(13, 62)
+    a.move_object(0, 28)
+    a.move_wide(1, 23)
+    a.invoke_interface([0, 1, 2], refs["M_HR_BY_DATE"])
+    a.move_result_object(14)
+    a.if_eqz(14, "hc_workouts")
+    a.invoke_virtual([14], refs["M_HR_MIN"])
+    a.move_result(1)
+    a.const16(2, 38)
+    a.if_lt(1, 2, "hc_workouts")
+    a.const16(2, 100)
+    a.if_gt(1, 2, "hc_workouts")
+    a.const16(2, 45)
+    a.if_ge(1, 2, "hc_rhr_lo")
+    a.move(1, 2)
+    a.label("hc_rhr_lo")
+    a.const16(2, 85)
+    a.if_le(1, 2, "hc_rhr_hi")
+    a.move(1, 2)
+    a.label("hc_rhr_hi")
+    a.move(13, 1)
+
+    # ---- Part 1: Workouts -> stArr (exercise min), wKcal (workout kcal), cycMin (cycling min) ----
+    a.label("hc_workouts")
+    a.move_object(0, 29)
+    a.move_wide(1, 21)
+    a.const_wide32(3, 86400000)
+    a.add_long_2addr(3, 1)
+    a.invoke_interface([0, 1, 2, 3, 4], refs["M_SPORT_BY_DATE"])
+    a.move_result_object(12)
+    a.if_eqz(12, "hc_extra_dur")
+    a.invoke_interface([12], refs["M_LIST_SIZE"])
+    a.move_result(11)
+    a.const4(10, 0)  # spIdx
+
+    a.label("hc_sp_loop")
+    a.if_ge(10, 11, "hc_extra_dur")
+    a.invoke_interface([12, 10], refs["M_LIST_GET"])
+    a.move_result_object(9)
+    a.if_eqz(9, "hc_sp_next")
+    a.check_cast(9, refs["T_SPORT_TABLE"])
+    a.invoke_virtual([9], refs["M_SPORT_GET_DUR"])
+    a.move_result(8)  # v8 = durSec
+    a.if_lez(8, "hc_sp_next")
+    a.invoke_virtual([9], refs["M_SPORT_GET_START"])
+    a.move_result_object(0)
+    a.if_eqz(0, "hc_sp_next")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(0)
+    a.move_wide(2, 21)
+    a.sub_long_2addr(0, 2)
+    a.const_wide16(2, 1000)
+    a.div_long_2addr(0, 2)
+    a.long_to_int(6, 0)  # v6 = startSec
+    a.if_gez(6, "hc_ss_lo")
+    a.const4(6, 0)
+    a.label("hc_ss_lo")
+    a.const32(0, 86399)
+    a.if_le(6, 0, "hc_ss_hi")
+    a.goto16("hc_sp_next")
+    a.label("hc_ss_hi")
+    a.move(7, 6)
+    a.add_int_2addr(7, 8)  # v7 = endSec = startSec + durSec
+    a.const32(0, 86400)
+    a.if_le(7, 0, "hc_es_hi")
+    a.move(7, 0)
+    a.label("hc_es_hi")
+    a.if_le(7, 6, "hc_sp_next")
+
+    # spKcal (v5, float): if cal > 5000 -> cal / 1000.0f else (float)cal
+    a.invoke_virtual([9], refs["M_SPORT_GET_CAL"])
+    a.move_result(0)
+    a.const4(5, 0)
+    a.if_lez(0, "hc_cal_ok")
+    a.int_to_float(5, 0)
+    a.const16(1, 5000)
+    a.if_le(0, 1, "hc_cal_ok")
+    a.const_float(1, 1000.0)
+    a.div_float_2addr(5, 1)
+    a.label("hc_cal_ok")
+
+    # isCyc (v4): 1 if SportTypeManager.INSTANCE.getMainTypeByType(type) == 2 (all cycling types)
+    a.const4(4, 0)
+    a.invoke_virtual([9], refs["M_SPORT_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "hc_ov_init")
+    a.const4(4, 1)
+
+    # Split workout overlap across hours h = startSec/3600 .. 23
+    a.label("hc_ov_init")
+    a.div_int_lit16(3, 6, 3600)  # v3 = h
+    a.label("hc_ov_loop")
+    a.const16(0, 24)
+    a.if_ge(3, 0, "hc_sp_next")
+    a.mul_int_lit16(0, 3, 3600)  # hStart
+    a.const16(1, 3600)
+    a.move(2, 0)
+    a.add_int_2addr(2, 1)        # hEnd = hStart + 3600
+    a.if_ge(0, 6, "hc_ov_s")
+    a.move(0, 6)                 # ovStart = max(startSec, hStart)
+    a.label("hc_ov_s")
+    a.if_le(2, 7, "hc_ov_e")
+    a.move(2, 7)                 # ovEnd = min(endSec, hEnd)
+    a.label("hc_ov_e")
+    a.sub_int_2addr(2, 0)        # ovSec = ovEnd - ovStart
+    a.if_lez(2, "hc_sp_next")
+
+    # ovMin (v0, float) = ovSec / 60.0f
+    a.int_to_float(0, 2)
+    a.const_float(1, 60.0)
+    a.div_float_2addr(0, 1)
+    a.aget(1, 19, 3)             # stArr[h] += ovMin
+    a.add_float_2addr(1, 0)
+    a.aput(1, 19, 3)
+    a.if_eqz(4, "hc_ov_kcal")
+    a.aget(1, 17, 3)             # cycMin[h] += ovMin
+    a.add_float_2addr(1, 0)
+    a.aput(1, 17, 3)
+
+    a.label("hc_ov_kcal")
+    a.const4(0, 0)
+    a.cmpl_float(0, 5, 0)
+    a.if_lez(0, "hc_ov_next")
+    a.int_to_float(0, 2)
+    a.int_to_float(1, 8)
+    a.div_float_2addr(0, 1)      # ovSec / durSec
+    a.mul_float_2addr(0, 5)      # share of spKcal
+    a.aget(1, 18, 3)
+    a.add_float_2addr(1, 0)
+    a.aput(1, 18, 3)
+
+    a.label("hc_ov_next")
+    a.add_int_lit8(3, 3, 1)
+    a.goto16("hc_ov_loop")
+
+    a.label("hc_sp_next")
+    a.add_int_lit8(10, 10, 1)
+    a.goto16("hc_sp_loop")
+
+    # If stepRow.totalDur > sum(stArr) + 1.0f, place remaining exercise minutes on peak active HR hour
+    a.label("hc_extra_dur")
+    a.const4(0, 0)  # stSum (float)
+    a.const4(1, 0)
+    a.label("hc_stsum_l")
+    a.const16(2, 24)
+    a.if_ge(1, 2, "hc_stsum_d")
+    a.aget(2, 19, 1)
+    a.add_float_2addr(0, 2)
+    a.add_int_lit8(1, 1, 1)
+    a.goto16("hc_stsum_l")
+    a.label("hc_stsum_d")
+    a.move_object(1, 20)
+    a.invoke_virtual([1], refs["M_STEP_GET_DUR"])
+    a.move_result(1)
+    a.if_lez(1, "hc_steps_start")
+    a.int_to_float(1, 1)
+    a.sub_float_2addr(1, 0)  # v1 = remDur (float)
+    a.const_float(2, 1.0)
+    a.cmpl_float(2, 1, 2)
+    a.if_lez(2, "hc_steps_start")
+    # Find hour with highest HR (default 12)
+    a.const16(3, 12)
+    a.if_eqz(14, "hc_add_remdur")
+    a.invoke_virtual([14], refs["M_HR_ITEMS"])
+    a.move_result_object(4)
+    a.if_eqz(4, "hc_add_remdur")
+    a.array_length(5, 4)
+    a.div_int_lit8(6, 5, 24)
+    a.if_lez(6, "hc_add_remdur")
+    a.const4(7, 0)  # bestHr
+    a.const4(8, 0)  # k
+    a.label("hc_pkhr_l")
+    a.if_ge(8, 5, "hc_add_remdur")
+    a.aget(9, 4, 8)
+    a.if_le(9, 7, "hc_pkhr_n")
+    a.move(7, 9)
+    a.move(3, 8)
+    a.div_int_2addr(3, 6)
+    a.label("hc_pkhr_n")
+    a.add_int_lit8(8, 8, 1)
+    a.goto16("hc_pkhr_l")
+    a.label("hc_add_remdur")
+    a.const16(2, 23)
+    a.if_le(3, 2, "hc_rd_ok")
+    a.move(3, 2)
+    a.label("hc_rd_ok")
+    a.aget(2, 19, 3)
+    a.add_float_2addr(2, 1)
+    a.aput(2, 19, 3)
+
+    # ---- Part 2: Hourly Steps (stepArr -> v16) ----
+    a.label("hc_steps_start")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_TOTAL"])
+    a.move_result(12)  # v12 = totalSteps
+    a.if_lez(12, "hc_kcal_start")
+
+    # Case A (dayOffset == 0): ingest Watch 4S BLE 0x59 48 half-hour hardware steps from SharedPreferences("CRPSDK")
+    a.move(0, 25)
+    a.if_nez(0, "hc_steps_keep_or_hr")
+    a.invoke_static([], refs["M_HYAPP_CTX"])
+    a.move_result_object(0)
+    a.if_eqz(0, "hc_steps_keep_or_hr")
+    a.const_string(1, refs["STR_CRPSDK"])
+    a.const4(2, 0)
+    a.invoke_virtual([0, 1, 2], refs["M_GET_SP"])
+    a.move_result_object(11)
+    a.if_eqz(11, "hc_steps_keep_or_hr")
+    a.const_string(1, refs["STR_TIME"])
+    a.const_wide16(2, 0)
+    a.invoke_interface([11, 1, 2, 3], refs["M_SP_GET_LONG"])
+    a.move_result_wide(0)
+    # Require ts >= localMidMs && ts < localMidMs + 86400000L
+    a.move_wide(2, 21)
+    a.cmp_long(4, 0, 2)
+    a.if_ltz(4, "hc_steps_keep_or_hr")
+    a.const_wide32(4, 86400000)
+    a.add_long_2addr(2, 4)
+    a.cmp_long(4, 0, 2)
+    a.if_gez(4, "hc_steps_keep_or_hr")
+
+    a.const_string(1, refs["STR_STEPS"])
+    a.const_string(2, refs["STR_EMPTY"])
+    a.invoke_interface([11, 1, 2], refs["M_SP_GET_STR"])
+    a.move_result_object(10)
+    a.if_eqz(10, "hc_steps_keep_or_hr")
+    a.const_string(1, refs["STR_TODAY"])
+    a.invoke_virtual([10, 1], refs["M_STR_CONTAINS"])
+    a.move_result(0)
+    a.if_eqz(0, "hc_steps_keep_or_hr")
+    a.const_string(1, refs["STR_LBRACK"])
+    a.invoke_virtual([10, 1], refs["M_STR_INDEXOF"])
+    a.move_result(9)  # v9 = pos of '['
+    a.if_ltz(9, "hc_steps_keep_or_hr")
+    a.add_int_lit8(9, 9, 1)
+    a.invoke_virtual([10], refs["M_STR_LEN"])
+    a.move_result(8)  # v8 = strLen
+    a.const4(7, 0)    # v7 = slot (0..47)
+    a.const4(6, 0)    # v6 = rawSum
+
+    # Compact charAt integer parser for 48 half-hour slots
+    a.label("hc_p_skip")
+    a.const16(0, 48)
+    a.if_ge(7, 0, "hc_p_done")
+    a.if_ge(9, 8, "hc_p_done")
+    a.invoke_virtual([10, 9], refs["M_STR_CHARAT"])
+    a.move_result(0)
+    a.const16(1, 93)  # ']'
+    a.if_eq(0, 1, "hc_p_done")
+    a.const16(1, 48)  # '0'
+    a.if_lt(0, 1, "hc_p_adv")
+    a.const16(2, 57)  # '9'
+    a.if_gt(0, 2, "hc_p_adv")
+    # Parse number into v5
+    a.const4(5, 0)
+    a.label("hc_p_num")
+    a.sub_int_2addr(0, 1)
+    a.mul_int_lit8(5, 5, 10)
+    a.add_int_2addr(5, 0)
+    a.add_int_lit8(9, 9, 1)
+    a.if_ge(9, 8, "hc_p_store")
+    a.invoke_virtual([10, 9], refs["M_STR_CHARAT"])
+    a.move_result(0)
+    a.if_lt(0, 1, "hc_p_store")
+    a.if_gt(0, 2, "hc_p_store")
+    a.goto16("hc_p_num")
+
+    a.label("hc_p_store")
+    a.div_int_lit8(3, 7, 2)  # h = slot / 2
+    a.aget(4, 16, 3)
+    a.add_int_2addr(4, 5)
+    a.aput(4, 16, 3)
+    a.add_int_2addr(6, 5)
+    a.add_int_lit8(7, 7, 1)
+    a.goto16("hc_p_skip")
+
+    a.label("hc_p_adv")
+    a.add_int_lit8(9, 9, 1)
+    a.goto16("hc_p_skip")
+
+    a.label("hc_p_done")
+    a.if_lez(6, "hc_steps_keep_or_hr")
+
+    # Deduct stripped cycling phantom steps (baseSteps) from cycling hours cycMin[h] (2-pass so
+    # overflow from one cycling hour is absorbed by adjacent cycling hours, keeping walking hours intact)
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
+    a.move_result(5)  # v5 = baseSteps
+    a.if_lez(5, "hc_reconcile")
+    a.move(7, 5)      # v7 = baseSteps (int)
+    a.const4(6, 0)    # cycTotal (float)
+    a.const4(0, 0)
+    a.label("hc_ct_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_ct_d")
+    a.aget(1, 17, 0)
+    a.add_float_2addr(6, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ct_l")
+    a.label("hc_ct_d")
+    a.const4(1, 0)
+    a.cmpl_float(1, 6, 1)
+    a.if_lez(1, "hc_reconcile")
+    a.int_to_float(5, 7)  # v5 = (float)baseSteps
+    a.const4(4, 0)        # v4 = dedSum (int)
+    a.const4(0, 0)
+    a.label("hc_cded_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_cded2_start")
+    a.aget(1, 17, 0)
+    a.const4(2, 0)
+    a.cmpl_float(2, 1, 2)
+    a.if_lez(2, "hc_cded_n")
+    a.mul_float_2addr(1, 5)
+    a.div_float_2addr(1, 6)
+    a.const_float(2, 0.5)
+    a.add_float_2addr(1, 2)
+    a.float_to_int(1, 1)
+    a.aget(2, 16, 0)
+    a.if_le(1, 2, "hc_cded_ok")
+    a.move(1, 2)
+    a.label("hc_cded_ok")
+    a.sub_int_2addr(2, 1)
+    a.aput(2, 16, 0)
+    a.add_int_2addr(4, 1)
+    a.label("hc_cded_n")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_cded_l")
+
+    a.label("hc_cded2_start")
+    a.sub_int_2addr(7, 4)  # v7 = remaining phantom steps un-deducted
+    a.if_lez(7, "hc_reconcile")
+    a.const4(0, 0)
+    a.label("hc_cded2_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_reconcile")
+    a.if_lez(7, "hc_reconcile")
+    a.aget(1, 17, 0)
+    a.const4(2, 0)
+    a.cmpl_float(2, 1, 2)
+    a.if_lez(2, "hc_cded2_n")
+    a.aget(2, 16, 0)
+    a.if_lez(2, "hc_cded2_n")
+    a.move(1, 7)
+    a.if_le(1, 2, "hc_cded2_ok")
+    a.move(1, 2)
+    a.label("hc_cded2_ok")
+    a.sub_int_2addr(2, 1)
+    a.aput(2, 16, 0)
+    a.sub_int_2addr(7, 1)
+    a.label("hc_cded2_n")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_cded2_l")
+
+    # Reconcile stepArr[0..23] to match totalSteps (v12) exactly
+    a.label("hc_reconcile")
+    a.const4(6, 0)  # curSum
+    a.const4(7, 0)  # maxH
+    a.const4(8, 0)  # maxV
+    a.const4(0, 0)
+    a.label("hc_rs_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_rs_d")
+    a.aget(1, 16, 0)
+    a.add_int_2addr(6, 1)
+    a.if_le(1, 8, "hc_rs_n")
+    a.move(8, 1)
+    a.move(7, 0)
+    a.label("hc_rs_n")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_rs_l")
+    a.label("hc_rs_d")
+    a.if_lez(6, "hc_steps_keep_or_hr")
+    a.if_eq(6, 12, "hc_kcal_start")
+    a.int_to_float(5, 12)
+    a.int_to_float(4, 6)
+    a.div_float_2addr(5, 4)  # v5 = scale = totalSteps / curSum
+    a.const4(6, 0)           # newSum
+    a.const4(0, 0)
+    a.label("hc_sc_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_sc_d")
+    a.aget(1, 16, 0)
+    a.if_lez(1, "hc_sc_n")
+    a.int_to_float(1, 1)
+    a.mul_float_2addr(1, 5)
+    a.const_float(2, 0.5)
+    a.add_float_2addr(1, 2)
+    a.float_to_int(1, 1)
+    a.aput(1, 16, 0)
+    a.add_int_2addr(6, 1)
+    a.label("hc_sc_n")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_sc_l")
+    a.label("hc_sc_d")
+    # Fix rounding delta on maxH (v7)
+    a.move(0, 12)
+    a.sub_int_2addr(0, 6)
+    a.aget(1, 16, 7)
+    a.add_int_2addr(1, 0)
+    a.if_gez(1, "hc_sc_pos")
+    a.const4(1, 0)
+    a.label("hc_sc_pos")
+    a.aput(1, 16, 7)
+    a.goto16("hc_kcal_start")
+
+    # Case B (past days or before 0x59): preserve existing valid items[24], else distribute by HR activity
+    a.label("hc_steps_keep_or_hr")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_ITEMS"])
+    a.move_result_object(10)
+    a.if_eqz(10, "hc_steps_hr")
+    a.array_length(1, 10)
+    a.const16(2, 24)
+    a.if_ne(1, 2, "hc_steps_hr")
+    a.const4(3, 0)  # sumOld
+    a.const4(0, 0)
+    a.label("hc_ko_l")
+    a.if_ge(0, 2, "hc_ko_d")
+    a.aget(1, 10, 0)
+    a.add_int_2addr(3, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ko_l")
+    a.label("hc_ko_d")
+    a.if_lez(3, "hc_steps_hr")
+    # Keep existing if within 25 steps of totalSteps (preserves saved hardware 0x59 histograms!)
+    a.move(4, 3)
+    a.sub_int_2addr(4, 12)
+    a.if_gez(4, "hc_ko_abs")
+    a.rsub_int_lit16(4, 4, 0)
+    a.label("hc_ko_abs")
+    a.const16(5, 25)
+    a.if_gt(4, 5, "hc_steps_hr")
+    a.const4(0, 0)
+    a.label("hc_ko_cp")
+    a.if_ge(0, 2, "hc_kcal_start")
+    a.aget(1, 10, 0)
+    a.aput(1, 16, 0)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ko_cp")
+
+    # Fallback HR-weighted hourly step distribution (for historical days before 0x59 was saved)
+    a.label("hc_steps_hr")
+    a.if_eqz(14, "hc_kcal_start")
+    a.invoke_virtual([14], refs["M_HR_ITEMS"])
+    a.move_result_object(10)
+    a.if_eqz(10, "hc_kcal_start")
+    a.array_length(9, 10)
+    a.div_int_lit8(8, 9, 24)  # slotsPerHour
+    a.if_lez(8, "hc_kcal_start")
+    a.add_int_lit8(7, 13, 12)  # baseHr = dayRhr + 12
+    a.const4(6, 0)             # totalW
+    a.const4(5, 0)             # h = 0
+    a.label("hc_hrw_h")
+    a.const16(0, 24)
+    a.if_ge(5, 0, "hc_hrw_done")
+    a.move(1, 5)
+    a.mul_int_2addr(1, 8)      # k = h * slotsPerHour
+    a.move(2, 1)
+    a.add_int_2addr(2, 8)      # end
+    a.if_lt(9, 2, "hc_hrw_hn")
+    a.const4(3, 0)             # w = 0
+    a.label("hc_hrw_k")
+    a.if_ge(1, 2, "hc_hrw_kd")
+    a.aget(4, 10, 1)
+    a.if_le(4, 7, "hc_hrw_kn")
+    a.sub_int_2addr(4, 7)
+    a.add_int_2addr(3, 4)
+    a.label("hc_hrw_kn")
+    a.add_int_lit8(1, 1, 1)
+    a.goto16("hc_hrw_k")
+    a.label("hc_hrw_kd")
+    # Down-weight cycling hours so phantom cycling HR doesn't absorb walking steps
+    a.aget(4, 17, 5)
+    a.const4(0, 0)
+    a.cmpl_float(0, 4, 0)
+    a.if_lez(0, "hc_hrw_put")
+    a.if_lez(3, "hc_hrw_put")
+    a.div_int_lit8(3, 3, 6)
+    a.label("hc_hrw_put")
+    a.aput(3, 16, 5)
+    a.add_int_2addr(6, 3)
+    a.label("hc_hrw_hn")
+    a.add_int_lit8(5, 5, 1)
+    a.goto16("hc_hrw_h")
+
+    a.label("hc_hrw_done")
+    a.if_lez(6, "hc_kcal_start")
+    # Reuse hc_reconcile to scale weights in stepArr (v16) to totalSteps (v12)!
+    a.goto16("hc_reconcile")
+
+    # ---- Part 3: Hourly Calories (kcalArr -> v15) ----
+    a.label("hc_kcal_start")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_KCAL"])
+    a.move_result(12)  # v12 = totalKcal (float)
+    a.const4(0, 0)
+    a.cmpl_float(0, 12, 0)
+    a.if_lez(0, "hc_save_check")
+
+    # Sum wKcal (v18) -> v11 (float)
+    a.const4(11, 0)
+    a.const4(0, 0)
+    a.label("hc_wks_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_wks_d")
+    a.aget(1, 18, 0)
+    a.add_float_2addr(11, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_wks_l")
+    a.label("hc_wks_d")
+
+    # Clamp wKcal scale <= 1.0 so workout kcal never exceeds daily totalKcal
+    a.const_float(10, 1.0)
+    a.cmpl_float(0, 11, 12)
+    a.if_lez(0, "hc_wk_cp")
+    a.div_float(10, 12, 11)
+    a.move(11, 12)
+    a.label("hc_wk_cp")
+    a.const4(0, 0)
+    a.label("hc_wk_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_wk_d")
+    a.aget(1, 18, 0)
+    a.mul_float_2addr(1, 10)
+    a.aput(1, 15, 0)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_wk_l")
+
+    # Distribute remKcal = totalKcal - wKcalSum proportionally across stepArr (v16)
+    a.label("hc_wk_d")
+    a.sub_float(9, 12, 11)  # v9 = remKcal
+    a.const_float(0, 0.1)
+    a.cmpl_float(0, 9, 0)
+    a.if_lez(0, "hc_save_check")
+    a.const4(8, 0)  # stepSum
+    a.const4(0, 0)
+    a.label("hc_ssum_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_ssum_d")
+    a.aget(1, 16, 0)
+    a.add_int_2addr(8, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ssum_l")
+    a.label("hc_ssum_d")
+    a.if_lez(8, "hc_save_check")
+    a.int_to_float(8, 8)
+    a.div_float(9, 9, 8)  # kcalPerStep
+    a.const4(0, 0)
+    a.label("hc_kdist_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_save_check")
+    a.aget(1, 16, 0)
+    a.if_lez(1, "hc_kdist_n")
+    a.int_to_float(1, 1)
+    a.mul_float_2addr(1, 9)
+    a.aget(2, 15, 0)
+    a.add_float_2addr(2, 1)
+    a.aput(2, 15, 0)
+    a.label("hc_kdist_n")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_kdist_l")
+
+    # ---- Part 4: Idempotent change check & StepDataDao.insert(stepRow) ----
+    a.label("hc_save_check")
+    a.const4(11, 0)  # dirty = 0
+
+    # Check stepArr (v16) non-empty & changed
+    a.const4(6, 0)
+    a.const4(0, 0)
+    a.label("hc_cs1_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_cs1_d")
+    a.aget(1, 16, 0)
+    a.add_int_2addr(6, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_cs1_l")
+    a.label("hc_cs1_d")
+    a.if_lez(6, "hc_chk_k")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_ITEMS"])
+    a.move_result_object(2)
+    a.if_eqz(2, "hc_set_s")
+    a.array_length(3, 2)
+    a.const16(1, 24)
+    a.if_ne(3, 1, "hc_set_s")
+    a.const4(0, 0)
+    a.label("hc_cs2_l")
+    a.if_ge(0, 1, "hc_chk_k")
+    a.aget(3, 2, 0)
+    a.aget(4, 16, 0)
+    a.if_ne(3, 4, "hc_set_s")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_cs2_l")
+    a.label("hc_set_s")
+    a.move_object(0, 20)
+    a.move_object(1, 16)
+    a.invoke_virtual([0, 1], refs["M_STEP_SET_ITEMS"])
+    a.const4(11, 1)
+
+    # Check kcalArr (v15) non-empty & changed (compare integer kcal)
+    a.label("hc_chk_k")
+    a.const4(6, 0)
+    a.const4(0, 0)
+    a.label("hc_ck1_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_ck1_d")
+    a.aget(1, 15, 0)
+    a.add_float_2addr(6, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ck1_l")
+    a.label("hc_ck1_d")
+    a.const4(1, 0)
+    a.cmpl_float(1, 6, 1)
+    a.if_lez(1, "hc_chk_st")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_KITEMS"])
+    a.move_result_object(2)
+    a.if_eqz(2, "hc_set_k")
+    a.array_length(3, 2)
+    a.const16(1, 24)
+    a.if_ne(3, 1, "hc_set_k")
+    a.const4(0, 0)
+    a.label("hc_ck2_l")
+    a.if_ge(0, 1, "hc_chk_st")
+    a.aget(3, 2, 0)
+    a.float_to_int(3, 3)
+    a.aget(4, 15, 0)
+    a.float_to_int(4, 4)
+    a.if_ne(3, 4, "hc_set_k")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ck2_l")
+    a.label("hc_set_k")
+    a.move_object(0, 20)
+    a.invoke_virtual([0, 15], refs["M_STEP_SET_KITEMS"])
+    a.const4(11, 1)
+
+    # Check stArr (v19) non-empty & changed (compare integer minutes)
+    a.label("hc_chk_st")
+    a.const4(6, 0)
+    a.const4(0, 0)
+    a.label("hc_ct1_l")
+    a.const16(1, 24)
+    a.if_ge(0, 1, "hc_ct1_d")
+    a.aget(1, 19, 0)
+    a.add_float_2addr(6, 1)
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ct1_l")
+    a.label("hc_ct1_d")
+    a.const4(1, 0)
+    a.cmpl_float(1, 6, 1)
+    a.if_lez(1, "hc_do_save")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_STIME"])
+    a.move_result_object(2)
+    a.if_eqz(2, "hc_set_st")
+    a.array_length(3, 2)
+    a.const16(1, 24)
+    a.if_ne(3, 1, "hc_set_st")
+    a.const4(0, 0)
+    a.label("hc_ct2_l")
+    a.if_ge(0, 1, "hc_do_save")
+    a.aget(3, 2, 0)
+    a.float_to_int(3, 3)
+    a.aget(4, 19, 0)
+    a.float_to_int(4, 4)
+    a.if_ne(3, 4, "hc_set_st")
+    a.add_int_lit8(0, 0, 1)
+    a.goto16("hc_ct2_l")
+    a.label("hc_set_st")
+    a.move_object(0, 20)
+    a.move_object(1, 19)
+    a.invoke_virtual([0, 1], refs["M_STEP_SET_STIME"])
+    a.const4(11, 1)
+
+    a.label("hc_do_save")
+    a.if_eqz(11, "hc_day_next")
+    a.move_object(0, 30)
+    a.move_object(1, 20)
+    a.invoke_interface([0, 1], refs["M_STEP_INSERT"])
+
+    a.label("hc_day_next")
+    a.add_int_lit8(25, 25, 1)
+    a.goto16("hc_day_loop")
+
+    a.label("hc_done")
+    a.return_void()
+    return a.assemble(pad_to_words=pad_words)
+
+
+def patch_classes6_hourly_charts(dex_bytes: bytes) -> bytes:
+    """
+    Patch classes6.dex with:
+      1) Unhide 24-hour mini bar charts on Home Data Hub Calories & Steps cards (bypass CommonUtil.B()).
+      2) Hourly Steps (from BLE 0x59 hardware histograms + HR fallback), Calories, and Exercise engine.
+      3) Live preservation guard in IDataHelper.N so Watch 4S bulk step syncs never wipe hourly arrays.
+    """
+    print("[*] Patching classes6.dex (Hourly Steps/Calories/Exercise Engine + Home Mini Charts)...")
+    d6 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    # 1) Bypass CommonUtil.B() in Home Data Hub Calories (dataloader/a) and Steps (dataloader/l) cards
+    mid_b = d6.find_idx("method", "Lcom/liesheng/haylou/utils/CommonUtil;->B()Z")
+    for cls, pc_off, dst_reg in (
+        ("Lcom/liesheng/module_home/homeV2/dataloader/a;", 0x19, 3),
+        ("Lcom/liesheng/module_home/homeV2/dataloader/l;", 0x0A, 1),
+    ):
+        info = d6.find_method_info(cls, f"{cls}->f(Lkotlin/coroutines/jvm/internal/SuspendLambda;)Ljava/lang/Object;", allow_tries=True)
+        off = info["code_off"] + 16 + pc_off * 2
+        expected = struct.pack("<HHHH", 0x0071, mid_b, 0x0000, 0x000A | (dst_reg << 8))
+        patched = struct.pack("<HHHH", 0x0012 | (dst_reg << 8), 0x0000, 0x0000, 0x0000)
+        cur = bytes(buf[off : off + 8])
+        if cur != patched:
+            assert cur == expected, f"Unexpected bytes at {cls}.f()+{pc_off:04x}: {cur.hex()}"
+            buf[off : off + 8] = patched
+
+    refs = {
+        "T_INT_ARR": d6.find_idx("type", "[I"),
+        "T_FLOAT_ARR": d6.find_idx("type", "[F"),
+        "T_SPORT_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/SportTable;"),
+        "F_APPDB_A": d6.find_idx("field", "Lcom/liesheng/AppDatabase;->a:Lcom/liesheng/AppDatabase$a;"),
+        "M_APPDB_B": d6.find_idx("method", "Lcom/liesheng/AppDatabase$a;->b()Lcom/liesheng/AppDatabase;"),
+        "M_APPDB_STEP_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->w()Lcom/liesheng/lib_room/dao/StepDataDao;"),
+        "M_APPDB_SPORT_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->u()Lcom/liesheng/lib_room/dao/SportDao;"),
+        "M_APPDB_HR_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->l()Lcom/liesheng/lib_room/dao/HeartRateDataDao;"),
+        "M_STEP_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/StepDataDao;->getStepDataByDate(J)Lcom/liesheng/lib_room/table/StepDataTable;"),
+        "M_STEP_INSERT": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/StepDataDao;->insert(Lcom/liesheng/lib_room/table/StepDataTable;)V"),
+        "M_STEP_GET_RECDATE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getRecordDate()Ljava/util/Date;"),
+        "M_STEP_GET_TOTAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalSteps()I"),
+        "M_STEP_GET_BASE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getBaseSteps()I"),
+        "M_STEP_GET_KCAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalKcal()F"),
+        "M_STEP_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getTotalDur()I"),
+        "M_STEP_GET_ITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getItems()[I"),
+        "M_STEP_SET_ITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setItems([I)V"),
+        "M_STEP_GET_KITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getKcalItems()[F"),
+        "M_STEP_SET_KITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setKcalItems([F)V"),
+        "M_STEP_GET_STIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getSportTimeItems()[F"),
+        "M_STEP_SET_STIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setSportTimeItems([F)V"),
+        "M_SPORT_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/SportDao;->getSportDataByDate(JJ)Ljava/util/List;"),
+        "M_SPORT_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDuration()I"),
+        "M_SPORT_GET_START": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getStartTime()Ljava/util/Date;"),
+        "M_SPORT_GET_CAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getCal()I"),
+        "M_SPORT_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getType()I"),
+        "F_STM_INST": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->INSTANCE:Lcom/liesheng/hayloufun/sport/data/SportTypeManager;"),
+        "M_STM_MAIN_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->getMainTypeByType(I)I"),
+        "M_HR_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/HeartRateDataDao;->getHeartDataByDate(J)Lcom/liesheng/lib_room/table/HeartRateDataTable;"),
+        "M_HR_MIN": d6.find_idx("method", "Lcom/liesheng/lib_room/table/HeartRateDataTable;->getMinHeartRate()I"),
+        "M_HR_ITEMS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/HeartRateDataTable;->getItems()[I"),
+        "M_HYAPP_CTX": d6.find_idx("method", "Lcom/liesheng/haylou/app/HyApplication;->getContext()Lcom/liesheng/haylou/app/HyApplication;"),
+        "M_GET_SP": d6.find_idx("method", "Landroid/content/Context;->getSharedPreferences(Ljava/lang/String;I)Landroid/content/SharedPreferences;"),
+        "M_SP_GET_STR": d6.find_idx("method", "Landroid/content/SharedPreferences;->getString(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+        "M_SP_GET_LONG": d6.find_idx("method", "Landroid/content/SharedPreferences;->getLong(Ljava/lang/String;J)J"),
+        "M_IDATA_Z": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->z(J)Ljava/util/Date;"),
+        "M_CHINA_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->b(J)J"),
+        "M_UTC_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->g(J)J"),
+        "M_DATE_GET_TIME": d6.find_idx("method", "Ljava/util/Date;->getTime()J"),
+        "M_SYS_TIME": d6.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J"),
+        "M_LIST_SIZE": d6.find_idx("method", "Ljava/util/List;->size()I"),
+        "M_LIST_GET": d6.find_idx("method", "Ljava/util/List;->get(I)Ljava/lang/Object;"),
+        "M_STR_LEN": d6.find_idx("method", "Ljava/lang/String;->length()I"),
+        "M_STR_CHARAT": d6.find_idx("method", "Ljava/lang/String;->charAt(I)C"),
+        "M_STR_INDEXOF": d6.find_idx("method", "Ljava/lang/String;->indexOf(Ljava/lang/String;)I"),
+        "M_STR_CONTAINS": d6.find_idx("method", "Ljava/lang/String;->contains(Ljava/lang/CharSequence;)Z"),
+        "STR_CRPSDK": d6.find_idx("string", "CRPSDK"),
+        "STR_STEPS": d6.find_idx("string", "steps"),
+        "STR_TIME": d6.find_idx("string", "time"),
+        "STR_TODAY": d6.find_idx("string", "TODAY"),
+        "STR_LBRACK": d6.find_idx("string", "["),
+        "STR_EMPTY": d6.find_idx("string", ""),
+    }
+
+    # 2) CustomCameraActivity.start(Context)V (0-caller, 30w, len=4)
+    #    <-> NadalWatchControlHelper$sendMsgToDevice$1.invokeSuspend(Object)Object (1244w, len=4)
+    m_hc = d6.find_method_info(
+        "Lcom/liesheng/module_device/CustomCameraActivity;",
+        "Lcom/liesheng/module_device/CustomCameraActivity;->start(Landroid/content/Context;)V",
+    )
+    m_host = d6.find_method_info(
+        "Lcom/liesheng/haylou/service/watch/nadal/NadalWatchControlHelper$sendMsgToDevice$1;",
+        "Lcom/liesheng/haylou/service/watch/nadal/NadalWatchControlHelper$sendMsgToDevice$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
+    )
+    if m_hc["insns_size"] >= 1000:
+        insns = _build_hourly_charts_insns(refs, pad_words=m_hc["insns_size"])
+        struct.pack_into("<4H2I", buf, m_hc["code_off"], 32, 1, 6, 0, 0, m_hc["insns_size"])
+        buf[m_hc["code_off"] + 16 : m_hc["code_off"] + 16 + len(insns)] = insns
+    else:
+        assert m_hc["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
+        insns = _build_hourly_charts_insns(refs, pad_words=m_host["insns_size"])
+        struct.pack_into("<4H2I", buf, m_host["code_off"], 32, 1, 6, 0, 0, m_host["insns_size"])
+        buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + len(insns)] = insns
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_hc["insns_size"])
+        struct.pack_into(
+            "<4H2I", buf, m_hc["code_off"],
+            m_host["ins_size"] + 1, m_host["ins_size"], 0, 0, 0, m_hc["insns_size"],
+        )
+        buf[m_hc["code_off"] + 16 : m_hc["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_hc["code_pos"] : m_hc["code_pos"] + 4] = encode_uleb128_4bytes(m_host["code_off"])
+        buf[m_host["code_pos"] : m_host["code_pos"] + 4] = encode_uleb128_4bytes(m_hc["code_off"])
+
+    call_hc_seq = struct.pack("<HHHH", 0x0012, 0x1071, m_hc["method_idx"], 0x0000)
+
+    # 3) Trigger on CommonUtil.z (after workout save) & SportRecordWidgetDataLoader.f() (Home IO)
+    _hook_common_util_z(buf, d6, call_hc_seq)
+    _hook_sport_record_loader(buf, d6, call_hc_seq)
+
+    # 4) Live preservation guard in IDataHelper.N so bulk Watch 4S step syncs (items=[]) never wipe
+    #    saved 24-hour items[], kcalItems[], and sportTimeItems[]
+    m_idh_n = d6.find_method_info(
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;",
+        "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->N(Lcom/liesheng/lib_room/table/StepDataTable;)V",
+    )
+    m_host_step_det = d6.find_method_info(
+        "Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;",
+        "Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;->copy$default(Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IFLjava/lang/String;FFIIII[I[I[II[F[F[ILjava/lang/String;ILjava/lang/Object;)Lcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;",
+    )
+    ph = DalvikAssembler()
+    ph.invoke_virtual([4], refs["M_STEP_GET_ITEMS"])
+    ph.move_result_object(0)
+    ph.if_eqz(0, "ph_fetch")
+    ph.array_length(1, 0)
+    ph.const16(2, 24)
+    ph.if_ne(1, 2, "ph_fetch")
+    ph.const4(1, 0)
+    ph.label("ph_chk")
+    ph.if_ge(1, 2, "ph_fetch")
+    ph.aget(2, 0, 1)
+    ph.if_nez(2, "ph_done")
+    ph.add_int_lit8(1, 1, 1)
+    ph.const16(2, 24)
+    ph.goto16("ph_chk")
+    ph.label("ph_fetch")
+    ph.invoke_virtual([4], refs["M_STEP_GET_RECDATE"])
+    ph.move_result_object(0)
+    ph.if_eqz(0, "ph_done")
+    ph.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    ph.move_result_wide(0)
+    ph.sget_object(2, refs["F_APPDB_A"])
+    ph.invoke_virtual([2], refs["M_APPDB_B"])
+    ph.move_result_object(2)
+    ph.invoke_virtual([2], refs["M_APPDB_STEP_DAO"])
+    ph.move_result_object(2)
+    ph.invoke_interface([2, 0, 1], refs["M_STEP_BY_DATE"])
+    ph.move_result_object(2)
+    ph.if_eqz(2, "ph_done")
+    # Preserve items[24]
+    ph.invoke_virtual([2], refs["M_STEP_GET_ITEMS"])
+    ph.move_result_object(0)
+    ph.if_eqz(0, "ph_k")
+    ph.array_length(1, 0)
+    ph.const16(0, 24)
+    ph.if_ne(1, 0, "ph_k")
+    ph.invoke_virtual([2], refs["M_STEP_GET_ITEMS"])
+    ph.move_result_object(0)
+    ph.invoke_virtual([4, 0], refs["M_STEP_SET_ITEMS"])
+    # Preserve kcalItems[24]
+    ph.label("ph_k")
+    ph.invoke_virtual([2], refs["M_STEP_GET_KITEMS"])
+    ph.move_result_object(0)
+    ph.if_eqz(0, "ph_st")
+    ph.array_length(1, 0)
+    ph.const16(0, 24)
+    ph.if_ne(1, 0, "ph_st")
+    ph.invoke_virtual([2], refs["M_STEP_GET_KITEMS"])
+    ph.move_result_object(0)
+    ph.invoke_virtual([4, 0], refs["M_STEP_SET_KITEMS"])
+    # Preserve sportTimeItems[24]
+    ph.label("ph_st")
+    ph.invoke_virtual([2], refs["M_STEP_GET_STIME"])
+    ph.move_result_object(0)
+    ph.if_eqz(0, "ph_done")
+    ph.array_length(1, 0)
+    ph.const16(0, 24)
+    ph.if_ne(1, 0, "ph_done")
+    ph.invoke_virtual([2], refs["M_STEP_GET_STIME"])
+    ph.move_result_object(0)
+    ph.invoke_virtual([4, 0], refs["M_STEP_SET_STIME"])
+    ph.label("ph_done")
+    ph_bytes = ph.assemble()
+
+    if m_idh_n["insns_size"] < 200:
+        assert m_idh_n["code_pos_len"] == 4 and m_host_step_det["code_pos_len"] == 4
+        orig_n = bytes(buf[m_idh_n["code_off"] + 16 : m_idh_n["code_off"] + 16 + m_idh_n["insns_size"] * 2])
+        combined = ph_bytes + orig_n
+        pad_w = m_host_step_det["insns_size"] - len(combined) // 2
+        assert pad_w >= 0
+        struct.pack_into(
+            "<4H2I", buf, m_host_step_det["code_off"],
+            m_idh_n["regs_size"], m_idh_n["ins_size"], max(m_idh_n["outs_size"], 3), 0, 0, m_host_step_det["insns_size"],
+        )
+        buf[m_host_step_det["code_off"] + 16 : m_host_step_det["code_off"] + 16 + m_host_step_det["insns_size"] * 2] = (
+            combined + b"\x00\x00" * pad_w
+        )
+        stub = DalvikAssembler()
+        stub.const4(0, 0)
+        stub.return_object(0)
+        stub_bytes = stub.assemble(pad_to_words=m_idh_n["insns_size"])
+        struct.pack_into(
+            "<4H2I", buf, m_idh_n["code_off"],
+            m_host_step_det["ins_size"] + 1, m_host_step_det["ins_size"], 0, 0, 0, m_idh_n["insns_size"],
+        )
+        buf[m_idh_n["code_off"] + 16 : m_idh_n["code_off"] + 16 + len(stub_bytes)] = stub_bytes
+        buf[m_idh_n["code_pos"] : m_idh_n["code_pos"] + 4] = encode_uleb128_4bytes(m_host_step_det["code_off"])
+        buf[m_host_step_det["code_pos"] : m_host_step_det["code_pos"] + 4] = encode_uleb128_4bytes(m_idh_n["code_off"])
+    else:
+        n_off = m_idh_n["code_off"] + 16
+        n_total = m_idh_n["insns_size"] * 2
+        cur_n = bytes(buf[n_off : n_off + n_total])
+        if ph_bytes not in cur_n:
+            end = n_total
+            while end >= 2 and cur_n[end - 2 : end] == b"\x00\x00":
+                end -= 2
+            combined = ph_bytes + cur_n[:end]
+            assert len(combined) <= n_total, f"IDataHelper.N overflow: {len(combined)//2}w > {n_total//2}w"
+            struct.pack_into(
+                "<4H2I", buf, m_idh_n["code_off"],
+                m_idh_n["regs_size"], m_idh_n["ins_size"], max(m_idh_n["outs_size"], 3), 0, 0, m_idh_n["insns_size"],
+            )
+            buf[n_off : n_off + n_total] = combined + b"\x00" * (n_total - len(combined))
+
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes6.dex Hourly Charts patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 4. classes7.dex — WatchConfig Unlocks + 3-Card Resting Heart Rate UI
 # --------------------------------------------------------------------------- #
+
+def patch_classes7_hourly_charts(dex_bytes: bytes) -> bytes:
+    """
+    Bypass the 5 CommonUtil.B() (CRP watch) gates in classes7.dex that hide hourly
+    Steps & Calories bar charts in DailyActDetailsActivity and remove the Day (D) tab
+    in StepDetailsActivity and ConsumeDetailsActivity.
+    """
+    print("[*] Patching classes7.dex (Unhide Daily Activities hourly bars + Steps/Calories Day tabs)...")
+    d7 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+    mid_b = d7.find_idx("method", "Lcom/liesheng/haylou/utils/CommonUtil;->B()Z")
+    changed = 0
+
+    targets = (
+        (
+            "Lcom/liesheng/module_home/v2/daily/DailyActDetailsActivity;",
+            "Lcom/liesheng/module_home/v2/daily/DailyActDetailsActivity;->initData$lambda$34$lambda$32(Lcom/liesheng/module_home/v2/daily/DailyActDetailsActivity;ZZLcom/liesheng/module_home/bean/StepDetailsBean$StepDetailsList;)Lkotlin/q;",
+            0xF3,
+            11,
+        ),
+        (
+            "Lcom/liesheng/module_home/v2/step/StepDetailsActivity;",
+            "Lcom/liesheng/module_home/v2/step/StepDetailsActivity;->buildTabs()[Ljava/lang/String;",
+            0x00,
+            0,
+        ),
+        (
+            "Lcom/liesheng/module_home/v2/step/StepDetailsActivity;",
+            "Lcom/liesheng/module_home/v2/step/StepDetailsActivity;->buildDetailsFragment(I)Landroidx/fragment/app/Fragment;",
+            0x00,
+            0,
+        ),
+        (
+            "Lcom/liesheng/module_home/v2/step/ConsumeDetailsActivity;",
+            "Lcom/liesheng/module_home/v2/step/ConsumeDetailsActivity;->buildTabs()[Ljava/lang/String;",
+            0x00,
+            0,
+        ),
+        (
+            "Lcom/liesheng/module_home/v2/step/ConsumeDetailsActivity;",
+            "Lcom/liesheng/module_home/v2/step/ConsumeDetailsActivity;->buildDetailsFragment(I)Landroidx/fragment/app/Fragment;",
+            0x00,
+            0,
+        ),
+    )
+    for cls, desc, pc_off, dst_reg in targets:
+        info = d7.find_method_info(cls, desc, allow_tries=True)
+        off = info["code_off"] + 16 + pc_off * 2
+        expected = struct.pack("<HHHH", 0x0071, mid_b, 0x0000, 0x000A | (dst_reg << 8))
+        patched = struct.pack("<HHHH", 0x0012 | (dst_reg << 8), 0x0000, 0x0000, 0x0000)
+        cur = bytes(buf[off : off + 8])
+        if cur != patched:
+            assert cur == expected, f"Unexpected bytes at {desc}+{pc_off:04x}: {cur.hex()}"
+            buf[off : off + 8] = patched
+            changed += 1
+
+    out = recompute_dex_checksums(buf) if changed else bytes(buf)
+    print(f"[+] classes7.dex Hourly Charts UI unhidden ({changed} sites patched)")
+    return out
 
 def patch_classes7_hrv_active(dex_bytes: bytes) -> bytes:
     """
@@ -4967,6 +6223,7 @@ def build_modded_apk(
     voip_calls: bool = True,
     workout_analytics: bool = True,
     hrv_active: bool = True,
+    hourly_charts: bool = True,
 ) -> str:
     if not os.path.isfile(src_apk):
         print(f"[-] Source APK not found: {src_apk}")
@@ -4979,17 +6236,22 @@ def build_modded_apk(
         if noclock:
             replacements["classes.dex"] = patch_classes_dex_noclock(zf.read("classes.dex"))
 
-        if noclock or night_raise_to_wake:
+        if noclock or night_raise_to_wake or hourly_charts:
             c3 = zf.read("classes3.dex")
             if noclock:
                 c3 = patch_classes3_dex_fb_bypass(c3)
             if night_raise_to_wake:
                 c3 = patch_classes3_night_quickview(c3)
+            if hourly_charts:
+                c3 = patch_classes3_hourly_charts(c3)
             replacements["classes3.dex"] = c3
+
+        if hourly_charts:
+            replacements["classes5.dex"] = patch_classes5_hourly_charts(zf.read("classes5.dex"))
 
         if (
             noclock or vitality_vo2 or night_raise_to_wake or cycling_fixes
-            or voip_calls or workout_analytics or hrv_active
+            or voip_calls or workout_analytics or hrv_active or hourly_charts
         ):
             c6 = zf.read("classes6.dex")
             if noclock:
@@ -5002,18 +6264,22 @@ def build_modded_apk(
                 c6 = patch_classes6_cycling_fixes(c6)
             if workout_analytics:
                 c6 = patch_classes6_workout_analytics(c6)
+            if hourly_charts:
+                c6 = patch_classes6_hourly_charts(c6)
             if hrv_active:
                 c6 = patch_classes6_hrv_active(c6)
             if voip_calls:
                 c6 = patch_classes6_voip_calls(c6)
             replacements["classes6.dex"] = c6
 
-        if unlock_cards or rhr or night_raise_to_wake or hrv_active:
+        if unlock_cards or rhr or night_raise_to_wake or hrv_active or hourly_charts:
             c7 = zf.read("classes7.dex")
             if unlock_cards:
                 c7 = patch_classes7_unlock_cards(c7)
             if hrv_active:
                 c7 = patch_classes7_hrv_active(c7)
+            if hourly_charts:
+                c7 = patch_classes7_hourly_charts(c7)
             if rhr:
                 c7 = patch_classes7_rhr(c7)
             if night_raise_to_wake:
@@ -5085,6 +6351,11 @@ def main():
         action="store_true",
         help="Stress-derived 30-min HRV engine + Hourly Active/Standing Hours (12h) engine",
     )
+    parser.add_argument(
+        "--hourly-charts",
+        action="store_true",
+        help="Unlock Watch 4S BLE 0x59 hourly step histograms + hourly Steps/Calories/Exercise Day charts",
+    )
     parser.add_argument("--verify-only", metavar="APK", help="Only verify v2/v3 signatures of an existing APK")
     args = parser.parse_args()
 
@@ -5096,7 +6367,7 @@ def main():
     any_specific = (
         args.noclock or args.unlock_cards or args.rhr
         or args.vitality_vo2 or args.night_raise_to_wake or args.cycling_fixes
-        or args.voip_calls or args.workout_analytics or args.hrv_active
+        or args.voip_calls or args.workout_analytics or args.hrv_active or args.hourly_charts
     )
     use_all = args.all or not any_specific
     do_noclock = use_all or args.noclock
@@ -5108,10 +6379,11 @@ def main():
     do_voip = use_all or args.voip_calls
     do_wa = use_all or args.workout_analytics
     do_ha = use_all or args.hrv_active
+    do_hc = use_all or args.hourly_charts
 
     out_path = args.out or (
         DEFAULT_OUT_FULL
-        if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv or do_cycling or do_voip or do_wa or do_ha)
+        if (do_unlock or do_rhr or do_pai_vo2 or do_night_qv or do_cycling or do_voip or do_wa or do_ha or do_hc)
         else DEFAULT_OUT_NOCLOCK
     )
 
@@ -5131,6 +6403,7 @@ def main():
         voip_calls=do_voip,
         workout_analytics=do_wa,
         hrv_active=do_ha,
+        hourly_charts=do_hc,
     )
 
 
