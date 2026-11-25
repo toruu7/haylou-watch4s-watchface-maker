@@ -1574,7 +1574,11 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.label("cs_add_steps")
     a.invoke_virtual([8], refs["M_SPORT_GET_STEPS"])
     a.move_result(0)
+    a.if_gtz(0, "cs_have_st")
+    a.invoke_virtual([8], refs["M_SPORT_GET_COUNTER"])
+    a.move_result(0)
     a.if_lez(0, "cs_add_dur")
+    a.label("cs_have_st")
     a.add_int_2addr(11, 0)
     a.label("cs_add_dur")
     a.invoke_virtual([8], refs["M_SPORT_GET_DUR"])
@@ -1944,12 +1948,16 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
 def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> bytes:
     """
     Build Lcom/liesheng/haylou/ui/main/WebViewActivity;->getCountryCode()I
-    (swapped into SportTable.copy$default, 649 words, regs=30, ins=0, outs=9).
+    (swapped into SportBasicTable.copy$default, 571 words, regs=33, ins=0, outs=9).
 
-    Walks the last 30 days (including today) idempotently:
-      1) Post-sync moving time & avg speed cleanup on cycling SportTables with GPS tracks
-         (strips < 0.85 m/s / < 3.06 km/h stops when >= 10s stopped; marks movingTime > 0).
-      2) Phantom cycling step cleanup on each cycling day's StepDataTable via ObjectHelper.hashCode.
+    Walks the last 30 days (including today) idempotently (and runs immediately inside
+    CommonUtil.z BEFORE Haylou Cloud / Strava upload):
+      1) Zeroes SportTable.steps on cycling workouts (stashing original watch-reported steps
+         in local-only SportTable.sportcounter so daily StepDataTable cleanup stays exact).
+      2) Post-sync moving time, avg speed & stationary GPS point filtering on cycling
+         SportTables with GPS tracks (strips < 0.85 m/s / < 3.06 km/h stopped points and
+         deducts stopped time when >= 10s stopped; marks movingTime > 0).
+      3) Phantom cycling step cleanup on each cycling day's StepDataTable via ObjectHelper.hashCode.
     """
     a = DalvikAssembler()
 
@@ -2027,6 +2035,19 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
 
     a.const4(15, 1)  # hasCycle = 1
 
+    # Zero SportTable.steps before Cloud/Strava upload, preserving original count in local-only sportcounter
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_STEPS"])
+    a.move_result(1)
+    a.if_lez(1, "bf_steps_clean")
+    a.invoke_virtual([0, 1], refs["M_SPORT_SET_COUNTER"])
+    a.const4(1, 0)
+    a.invoke_virtual([0, 1], refs["M_SPORT_SET_STEPS"])
+    a.move_object(0, 27)
+    a.move_object(1, 14)
+    a.invoke_interface([0, 1], refs["M_SPORT_UPDATE"])
+    a.label("bf_steps_clean")
+
     # Skip moving-time GPS scan if already processed (movingTime > 0),
     # EXCEPT self-heal rides previously clamped to (duration=60, movingTime=60)
     a.move_object(0, 14)
@@ -2059,9 +2080,16 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.const4(1, 5)
     a.if_lt(12, 1, "bf_sp_next")
 
-    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx)
+    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx, v32 = cleanPoints)
     a.const4(0, 3)
     a.new_array(8, 0, refs["T_FLOAT_ARR"])
+    a.new_instance(0, refs["T_ARRAYLIST"])
+    a.invoke_direct([0, 12], refs["M_AL_INIT_CAP"])
+    a.move_object(32, 0)
+    a.const4(1, 0)
+    a.invoke_interface([13, 1], refs["M_LIST_GET"])
+    a.move_result_object(1)
+    a.invoke_virtual([0, 1], refs["M_AL_ADD"])  # always keep start point
     a.const_wide16(9, 0)
     a.const_wide16(30, 0)
     a.const4(11, 1)
@@ -2088,10 +2116,10 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.if_gtz(1, "bf_dt_pos")
     a.const_wide16(4, 2000)
     a.label("bf_dt_pos")
-    # Skip GPS gaps > 30s (manual watch pauses / GPS dropouts already excluded from Watch validTime)
+    # GPS gaps > 30s (manual watch pauses / GPS dropouts): keep restart point, skip speed math
     a.const_wide32(2, 30000)
     a.cmp_long(1, 4, 2)
-    a.if_gtz(1, "bf_pt_next")
+    a.if_gtz(1, "bf_pt_gap_keep")
     a.move_wide(28, 4)  # save dtMs in v28,v29
 
     # Load lat2(v4,v5), lon2(v6,v7), lon1(v2,v3), lat1(v0,v1) for distanceBetween(v0..v8)
@@ -2113,10 +2141,20 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.mul_float_2addr(1, 4)      # v1 = 0.85 * dtSec
     a.cmpl_float(4, 0, 1)        # d < 0.85 * dtSec ?
     a.if_gez(4, "bf_pt_moving")
-    a.add_long_2addr(9, 2)       # stoppedMs += dtMs
+    a.add_long_2addr(9, 2)       # stoppedMs += dtMs (drop stationary point from cleanPoints)
     a.goto16("bf_pt_next")
+
+    a.label("bf_pt_gap_keep")
+    a.move_object(0, 32)
+    a.invoke_virtual([0, 6], refs["M_AL_ADD"])
+    a.goto16("bf_pt_next")
+
     a.label("bf_pt_moving")
     a.add_long(30, 30, 2)        # movingMs += dtMs
+    a.invoke_interface([13, 11], refs["M_LIST_GET"])
+    a.move_result_object(1)
+    a.move_object(0, 32)
+    a.invoke_virtual([0, 1], refs["M_AL_ADD"])
 
     a.label("bf_pt_next")
     a.add_int_lit8(11, 11, 1)
@@ -2131,6 +2169,19 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.move_wide(4, 30)
     a.div_long_2addr(4, 2)
     a.long_to_int(6, 4)          # v6 = movingSec
+
+    # Replace GPS track with stationary-filtered points when >= 10s stopped & >= 5 points kept
+    a.const16(3, 10)
+    a.if_lt(0, 3, "bf_pts_done")
+    a.move_object(4, 32)
+    a.invoke_virtual([4], refs["M_AL_SIZE"])
+    a.move_result(5)
+    a.const4(3, 5)
+    a.if_lt(5, 3, "bf_pts_done")
+    a.if_ge(5, 12, "bf_pts_done")
+    a.move_object(3, 14)
+    a.invoke_virtual([3, 4], refs["M_SPORT_SET_POINTS"])
+    a.label("bf_pts_done")
 
     a.move_object(1, 14)
     a.invoke_virtual([1], refs["M_SPORT_GET_DUR"])
@@ -2323,6 +2374,7 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
         "T_REALSTEP": d6.find_idx("type", "Lcom/yingsheng/protocol/data/bean/RealStepData;"),
         "T_INT_ARR": d6.find_idx("type", "[I"),
         "T_FLOAT_ARR": d6.find_idx("type", "[F"),
+        "T_ARRAYLIST": d6.find_idx("type", "Ljava/util/ArrayList;"),
         "F_APPDB_A": d6.find_idx("field", "Lcom/liesheng/AppDatabase;->a:Lcom/liesheng/AppDatabase$a;"),
         "F_STM_INST": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->INSTANCE:Lcom/liesheng/hayloufun/sport/data/SportTypeManager;"),
         "F_SRM_K": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/running/SportRunningManager;->k:Z"),
@@ -2345,9 +2397,13 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
         "M_SPORT_GET_MOVING": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getMovingTime()J"),
         "M_SPORT_SET_MOVING": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMovingTime(J)V"),
         "M_SPORT_GET_POINTS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getPoints()Ljava/util/List;"),
+        "M_SPORT_SET_POINTS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setPoints(Ljava/util/List;)V"),
         "M_SPORT_START": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getStartTime()Ljava/util/Date;"),
         "M_SPORT_END": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getEndTime()Ljava/util/Date;"),
         "M_SPORT_GET_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSteps()I"),
+        "M_SPORT_SET_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setSteps(I)V"),
+        "M_SPORT_GET_COUNTER": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSportcounter()I"),
+        "M_SPORT_SET_COUNTER": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setSportcounter(I)V"),
         "M_SPORT_GET_DIST": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDistance()F"),
         "M_SPORT_GET_CAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getCal()I"),
         "M_PT_LAT": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getLatitude()D"),
@@ -2394,6 +2450,9 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
         "M_MMKV_ENC_INT": d6.find_idx("method", "Lcom/tencent/mmkv/MMKV;->encode(Ljava/lang/String;I)Z"),
         "M_LIST_SIZE": d6.find_idx("method", "Ljava/util/List;->size()I"),
         "M_LIST_GET": d6.find_idx("method", "Ljava/util/List;->get(I)Ljava/lang/Object;"),
+        "M_AL_INIT_CAP": d6.find_idx("method", "Ljava/util/ArrayList;-><init>(I)V"),
+        "M_AL_ADD": d6.find_idx("method", "Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z"),
+        "M_AL_SIZE": d6.find_idx("method", "Ljava/util/ArrayList;->size()I"),
         "M_DATE_GET_TIME": d6.find_idx("method", "Ljava/util/Date;->getTime()J"),
         "M_SYS_TIME": d6.find_idx("method", "Ljava/lang/System;->currentTimeMillis()J"),
         "M_OBJ_HASH": d6.find_idx("method", "Lio/reactivex/internal/functions/ObjectHelper;->hashCode(Ljava/lang/Object;)I"),
@@ -2470,7 +2529,7 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
         "Lcom/liesheng/lib_room/table/SportBasicTable;->copy$default(Lcom/liesheng/lib_room/table/SportBasicTable;Ljava/util/Date;Ljava/lang/String;Ljava/util/Date;IIIIILjava/lang/String;FIIIIIIIIIIIZZZLjava/lang/Integer;IIIIIIIIIJLjava/lang/String;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;IIIIILjava/lang/Object;)Lcom/liesheng/lib_room/table/SportBasicTable;",
     )
     _swap_or_refresh(
-        m_get_cc, m_host_basic, regs=32, ins=0, outs=9,
+        m_get_cc, m_host_basic, regs=33, ins=0, outs=9,
         build_fn=lambda pad: _build_cycling_backfill_insns(d6, refs, pad),
         swapped_min_words=500,
     )
