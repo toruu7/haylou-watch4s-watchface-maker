@@ -2185,28 +2185,14 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.invoke_interface([0, 1], refs["M_SPORT_UPDATE"])
     a.label("bf_steps_clean")
 
-    # Skip moving-time GPS scan if already processed (movingTime > 0),
-    # EXCEPT self-heal rides previously clamped to (duration=60, movingTime=60)
+    # Compute true moving duration directly from SportTable.points (handles both raw 2s tracks and
+    # crp/i.c-deduplicated stationary gaps > 30s, while excluding manual pauses > 120s and GPS spikes).
     a.move_object(0, 14)
     a.invoke_virtual([0], refs["M_SPORT_GET_DUR"])
     a.move_result(4)  # v4 = origDur
     a.const16(1, 60)
     a.if_lt(4, 1, "bf_sp_next")
 
-    a.move_object(0, 14)
-    a.invoke_virtual([0], refs["M_SPORT_GET_MOVING"])
-    a.move_result_wide(0)
-    a.const_wide16(2, 0)
-    a.cmp_long(2, 0, 2)
-    a.if_lez(2, "bf_need_scan")
-    # movingTime > 0: only re-scan if both movingTime == 60L and origDur == 60
-    a.const_wide16(2, 60)
-    a.cmp_long(2, 0, 2)
-    a.if_nez(2, "bf_sp_next")
-    a.const16(1, 60)
-    a.if_ne(4, 1, "bf_sp_next")
-
-    a.label("bf_need_scan")
     a.move_object(0, 14)
     a.invoke_virtual([0], refs["M_SPORT_GET_POINTS"])
     a.move_result_object(13)
@@ -2217,11 +2203,10 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.const4(1, 5)
     a.if_lt(12, 1, "bf_sp_next")
 
-    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx)
+    # Scan consecutive GPS points (v8 = float[3], v30,v31 = movingMs, v11 = ptIdx)
     # Keep SportTable.points 100% intact so Strava receives the unbroken GPS track for smooth speed curves.
     a.const4(0, 3)
     a.new_array(8, 0, refs["T_FLOAT_ARR"])
-    a.const_wide16(9, 0)
     a.const_wide16(30, 0)
     a.const4(11, 1)
 
@@ -2247,8 +2232,8 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.if_gtz(1, "bf_dt_pos")
     a.const_wide16(4, 2000)
     a.label("bf_dt_pos")
-    # GPS gaps > 30s (manual watch pauses / GPS dropouts): skip speed math
-    a.const_wide32(2, 30000)
+    # Exclude gaps > 120s (manual watch pauses & long stops); keep <= 120s so brief tunnels count if moving
+    a.const_wide32(2, 120000)
     a.cmp_long(1, 4, 2)
     a.if_gtz(1, "bf_pt_next")
     a.move_wide(28, 4)  # save dtMs in v28,v29
@@ -2269,13 +2254,13 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.move_wide(2, 28)           # v2,v3 = dtMs
     a.long_to_float(1, 2)        # v1 = (float) dtMs
     a.const_float(4, 0.00085)    # 0.85 m/s = 0.00085 m/ms (~3.06 km/h)
-    a.mul_float_2addr(1, 4)      # v1 = 0.85 * dtSec
-    a.cmpl_float(4, 0, 1)        # d < 0.85 * dtSec ?
-    a.if_gez(4, "bf_pt_moving")
-    a.add_long_2addr(9, 2)       # stoppedMs += dtMs
-    a.goto16("bf_pt_next")
-
-    a.label("bf_pt_moving")
+    a.mul_float(5, 1, 4)         # v5 = minDist = 0.85 * dtSec
+    a.cmpl_float(4, 0, 5)        # d < minDist ? (stopped — including crp/i.c-deduplicated stops!)
+    a.if_ltz(4, "bf_pt_next")
+    a.const_float(4, 0.025)      # 25.0 m/s = 90 km/h (reject GPS teleport spikes)
+    a.mul_float(5, 1, 4)         # v5 = maxDist = 25.0 * dtSec
+    a.cmpl_float(4, 0, 5)        # d > maxDist ?
+    a.if_gtz(4, "bf_pt_next")
     a.add_long(30, 30, 2)        # movingMs += dtMs
 
     a.label("bf_pt_next")
@@ -2283,12 +2268,8 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.goto16("bf_pt_loop")
 
     a.label("bf_pt_done")
-    a.move_wide(0, 9)
-    a.const_wide16(2, 1000)
-    a.div_long_2addr(0, 2)
-    a.long_to_int(0, 0)          # v0 = stoppedSec
-
     a.move_wide(4, 30)
+    a.const_wide16(2, 1000)
     a.div_long_2addr(4, 2)
     a.long_to_int(6, 4)          # v6 = movingSec
 
@@ -2297,28 +2278,35 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.move_result(1)             # v1 = origDur
     a.move(2, 1)                 # v2 = newDur = origDur
 
-    # Self-heal previously 60s-clamped watch-paused ride from GPS movingSec
     a.const16(3, 60)
+    a.if_lt(6, 3, "bf_sp_chk_mark")  # ignore GPS if < 60s total moving signal
+
+    # Self-heal previously 60s-clamped watch-paused ride from GPS movingSec
     a.if_ne(1, 3, "bf_norm_dur")
-    a.if_le(6, 3, "bf_sp_mark")
+    a.if_le(6, 3, "bf_sp_chk_mark")
     a.move(2, 6)
     a.goto16("bf_dur_ok")
 
+    # Update duration to true movingSec whenever >= 10s of stationary stops can be stripped
     a.label("bf_norm_dur")
-    a.const16(3, 10)
-    a.if_lt(0, 3, "bf_sp_mark")  # only adjust duration if stopped >= 10s
-    a.sub_int_2addr(2, 0)        # newDur = origDur - stoppedSec
-    a.const16(3, 60)
-    a.if_ge(2, 3, "bf_dur_ok")
-    a.move(2, 3)                 # floor at max(60, movingSec)
-    a.if_le(6, 2, "bf_dur_ok")
+    a.add_int_lit8(3, 6, 10)     # v3 = movingSec + 10
+    a.if_gt(3, 1, "bf_sp_chk_mark")  # require movingSec <= origDur - 10
     a.move(2, 6)
     a.label("bf_dur_ok")
     a.move_object(0, 14)
     a.invoke_virtual([0, 2], refs["M_SPORT_SET_DUR"])
 
-    a.label("bf_sp_mark")
-    a.int_to_long(4, 2)
+    # Persist idempotently: only call SportDao.update if duration or movingTime actually changed
+    a.label("bf_sp_chk_mark")
+    a.int_to_long(4, 2)          # v4,v5 = (long) newDur
+    a.if_ne(2, 1, "bf_sp_save")
+    a.move_object(0, 14)
+    a.invoke_virtual([0], refs["M_SPORT_GET_MOVING"])
+    a.move_result_wide(6)
+    a.cmp_long(0, 6, 4)
+    a.if_eqz(0, "bf_sp_next")    # already up-to-date -> zero DB write!
+
+    a.label("bf_sp_save")
     a.move_object(0, 14)
     a.invoke_virtual([0, 4, 5], refs["M_SPORT_SET_MOVING"])
     a.move_object(0, 27)
