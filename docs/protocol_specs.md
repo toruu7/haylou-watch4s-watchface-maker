@@ -103,11 +103,11 @@ All sprite coordinates are top-left `(x, y)` on the `466×466` display unless no
 | `01 10` | `3+5N` B | `BBB + N×B + N×HH` | **Live Year (`YYYY`):** `n=4`, 4 `dt` indices + 4 coords |
 | `01 11` | 27 B | `BBBHHHH + 2×IHH` | **AM / PM Indicator:** `sub=1`, `(x1, y1, x2, y2)`, AM sprite, PM sprite |
 | `01 12` | `8+N×8` B | `BBBBHH + N×IHH` | **Multi-Frame Progress / Gauge (`N=11` for `0%..100%`):** `sub=0x00` Steps, `0x02` Calories, `0x03` Distance, `0x05` Active/HR, `0x06` Battery |
-| `01 14` | 23 B | `BBBHH + 2×IHH` | **Bluetooth Status (2-state):** `sub=0`, `x, y`, connected/disconnected sprites |
+| `01 14` | 23 B | `BBBHH + 2×IHH` | **Bluetooth Status (2-state):** `sub=0`, `x, y`, `s0` = disconnected sprite, `s1` = connected sprite |
 | `01 15` | 8 B | `BBBBHH` | **Live Battery Percentage (`0..100`):** `dt_idx, align, x, y` |
 | `01 18` | 12 B | `BBBBHHHH` | **Live Seconds (`SS`):** `dt_s1, dt_s0, x1, y1, x2, y2` |
-| `01 1a` | `8+N×8` B | `BBBBHH + N×IHH` | **Multi-State Art / Tap-Switch Frame:** `sub=0, cnt, x, y` + `cnt` sprites |
-| `01 1b` | `7+N×8` B | `BBBHH + N×IHH` | **Weather Icon (`N=9`):** 9 weather state sprites |
+| `01 1a` | `8+N×8` B | `BBBBHH + N×IHH` | **Multi-State Art / Tap-Switch Frame:** `sub=0, cnt, x, y` + `cnt` sprites (requires 8-byte `00 02` animation prefix at `0x10`) |
+| `01 1b` | `7+N×8` B | `BBBHH + N×IHH` | **Weather Icon (`N=9`):** `0`=Partly Cloudy, `1`=Fog/Mist, `2`=Cloudy, `3`=Rain, `4`=Snow, `5`=Sunny/Clear, `6`=Wind/Dust, `7`=Haze/Smog, `8`=Unknown |
 | `01 1c` | 32 B | `BBBBHH + 3×IHH` | **Temperature:** `dt_idx, align, x, y`, minus, `°C`, `°F` sprites |
 | `01 1d` | 3 B | `BBB` | **Color/Style Group Tag:** `group_id` |
 | `01 1f` | 22 B | `BBHH + 2×IHH` | **Distance Unit (`km`/`mi`):** `x, y`, km sprite, mi sprite |

@@ -1,8 +1,9 @@
 """
 Haylou Watch 4S Studio — local Studio backend.
 
-Serves the browser designer, compiles .bin files, manages presets, and bridges
-ADB for pushing dials / installing the modded companion app.
+Serves the browser designer, compiles .bin files, manages presets & multi-layer
+assets (custom hands, tap-switch scenes, PNG stickers, animated GIF zones), and
+bridges ADB for pushing dials / installing the modded companion app.
 
 Runs on 127.0.0.1 only. No network exposure, no telemetry, no accounts.
 """
@@ -40,24 +41,30 @@ MODDED_APK = MODDED_APK_CANDIDATES[1]
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("STUDIO_PORT", "8466"))
 
-MAX_JSON_BODY = 32 * 1024 * 1024
+MAX_JSON_BODY = 64 * 1024 * 1024
 MAX_BIN_BYTES = 8 * 1024 * 1024
 MAX_FONT_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
 FONT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"OTTO", b"ttcf", b"wOFF", b"wOF2")
 KNOWN_BIN_FLAGS = (
-    0x0002, 0x0004, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000D,
+    0x0002, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000D,
     0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0014, 0x0015, 0x0018,
     0x001A, 0x001B, 0x001C, 0x001D, 0x001F, 0x0023, 0x0025, 0x002E,
 )
-BUNDLE_FILES = ("meta.json", "config.json", "preview.png", "source.png", "source.gif", "source.webp", "watchface.bin")
+BUNDLE_FILES = (
+    "meta.json", "config.json", "preview.png",
+    "source.png", "source.jpg", "source.gif", "source.webp", "watchface.bin",
+)
+SAFE_ASSET_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 sys.path.insert(0, SCRIPTS_DIR)
 from watchface_bin_maker import find_adb, push_bin_to_phone
 from watchface_compiler import (
+    MAX_WATCH_BIN_BYTES,
     compile_config_to_bin,
     decode_bin_preview,
     inspect_watchface_bin,
+    normalize_gauges,
     render_config_animated_preview,
     render_config_preview,
 )
@@ -88,6 +95,17 @@ def safe_preset_dir(pid):
     if path == base or os.path.commonpath([base, path]) != base:
         return None
     return path
+
+
+def _path_within(path, root):
+    if not path or not root:
+        return False
+    try:
+        rp = os.path.realpath(path)
+        rr = os.path.realpath(root)
+        return rp != rr and os.path.commonpath([rr, rp]) == rr
+    except Exception:
+        return False
 
 
 def valid_bin(raw):
@@ -253,35 +271,75 @@ def summarize_config(cfg):
         parts.append(f"Omnitrix ({bg.get('omni_style', 'alien_force').upper()})")
     elif mode == "animated_gif":
         parts.append(f"Animated GIF ({bg.get('anim_frames', 8)}f @ {bg.get('anim_fps', 4)}fps)")
-    elif mode == "pipboy":
-        parts.append("Pip-Boy 3000 (CRT Terminal)")
     elif mode == "image":
         parts.append("Custom Image")
     else:
         parts.append("Gradient/Solid")
+
+    ts = cfg.get("tap_switch", {})
+    if ts.get("enabled"):
+        parts.append(f"Tap-Switch ({ts.get('mode', 'day_night').replace('_', ' ')})")
+
+    bz = cfg.get("bezel", {})
+    if bz.get("enabled"):
+        parts.append(f"Bezel ({bz.get('style', 'baton').replace('_', ' ')})")
+
     clk = cfg.get("digital_clock", {})
     if clk.get("enabled"):
         s = f"Digital ({clk.get('layout', 'horizontal')})"
         if clk.get("show_seconds"):
             s += "+Sec"
+        if clk.get("show_ampm"):
+            s += "+AM/PM"
         parts.append(s)
-    if cfg.get("date", {}).get("enabled"):
-        parts.append(f"Date ({cfg['date'].get('format', 'MM/DD')})")
+
+    dt = cfg.get("date", {})
+    if dt.get("enabled"):
+        s = f"Date ({dt.get('format', 'MM/DD')})"
+        if dt.get("show_year"):
+            s += "+Yr"
+        parts.append(s)
+
+    if cfg.get("weather", {}).get("enabled"):
+        parts.append("Weather")
+    if cfg.get("bluetooth", {}).get("enabled"):
+        parts.append("BT")
+
     if cfg.get("analog_hands", {}).get("enabled"):
         parts.append(f"Hands ({cfg['analog_hands'].get('style', 'omnitrix')})")
-    if cfg.get("battery", {}).get("enabled"):
-        metric = cfg["battery"].get("metric", "battery").capitalize()
-        parts.append(f"{metric} ({cfg['battery'].get('style', 'ring')})")
+
+    gauges = [g for g in normalize_gauges(cfg) if g.get("enabled", True)]
+    if gauges:
+        if len(gauges) == 1:
+            g = gauges[0]
+            parts.append(f"{g.get('metric', 'battery').capitalize()} ({g.get('style', 'ring')})")
+        else:
+            parts.append(f"{len(gauges)} Gauges")
+
     if cfg.get("weekday", {}).get("enabled"):
         parts.append("Weekday")
+
     telem = cfg.get("telemetry", {})
     if telem.get("enabled"):
         tlist = []
         for k, lbl in (("steps", "Steps"), ("heart_rate", "HR"), ("calories", "Cal"), ("distance", "Dist"), ("battery_pct", "Batt%")):
             if isinstance(telem.get(k), dict) and telem[k].get("enabled"):
                 tlist.append(lbl)
+        if telem.get("show_distance_unit") or (isinstance(telem.get("distance_unit"), dict) and telem["distance_unit"].get("enabled")):
+            tlist.append("km/mi")
         if tlist:
             parts.append("Live " + "/".join(tlist))
+
+    anims = [a for a in (cfg.get("anim_sprites") or []) if isinstance(a, dict) and a.get("enabled", True)]
+    if anims:
+        parts.append(f"{len(anims)} GIF Zone" + ("s" if len(anims) != 1 else ""))
+    ovs = [o for o in (cfg.get("overlays") or []) if isinstance(o, dict) and o.get("enabled", True)]
+    if ovs:
+        parts.append(f"{len(ovs)} Sticker" + ("s" if len(ovs) != 1 else ""))
+    txts = [t for t in (cfg.get("text_labels") or []) if isinstance(t, dict) and t.get("enabled", True) and str(t.get("text", "")).strip()]
+    if txts:
+        parts.append(f"{len(txts)} Text")
+
     if len(parts) == 1 and mode != "animated_gif":
         parts.append("Pure Image · No Clock")
     return " · ".join(parts)
@@ -297,30 +355,256 @@ def _detect_image_ext(raw):
     return ".png"
 
 
-def resolve_config_image(cfg, temp_dir=None, filename=None):
-    """Write inline base64 image/GIF data to a unique/requested file and point config at it."""
+def _mime_for_path(path):
+    ext = os.path.splitext(path)[1].lower()
+    return {
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+    }.get(ext, "image/png")
+
+
+def _file_to_data_url(path):
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        raw = f.read()
+    return f"data:{_mime_for_path(path)};base64," + base64.b64encode(raw).decode("ascii")
+
+
+def _write_data_url_asset(b64_str, out_dir, stem):
+    """Decode base64/data-URL image and write to out_dir/<stem><ext>. Returns file path."""
+    if "," in b64_str:
+        b64_str = b64_str.split(",", 1)[1]
+    raw = base64.b64decode(b64_str)
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("Image too large (limit 16 MB).")
+    os.makedirs(out_dir, exist_ok=True)
+    ext = _detect_image_ext(raw)
+    safe_stem = slugify(stem)[:48]
+    dest = os.path.join(out_dir, safe_stem + ext)
+    with open(dest, "wb") as f:
+        f.write(raw)
+    return dest
+
+
+def _safe_existing_asset(path, persist_dir=None):
+    """Keep an existing image_path only if it lives safely inside PRESETS_DIR (or persist_dir)."""
+    if not isinstance(path, str) or not path or not os.path.isfile(path):
+        return None
+    if persist_dir and _path_within(path, persist_dir):
+        return path
+    if _path_within(path, PRESETS_DIR):
+        return path
+    return None
+
+
+def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
+    """
+    Decode all inline base64 `*_image_data` fields (background, tap_switch frames,
+    custom analog hands/cap, PNG overlays, animated GIF zones) to files on disk
+    and replace them with clean `*_image_path` references.
+    """
     cfg_copy = json.loads(json.dumps(cfg))
-    bg = cfg_copy.get("background", {})
-    img_b64 = bg.pop("image_data", None)
-    if bg.get("mode") in ("image", "animated_gif") and img_b64:
-        if "," in img_b64:
-            img_b64 = img_b64.split(",", 1)[1]
-        raw = base64.b64decode(img_b64)
-        if len(raw) > MAX_IMAGE_BYTES:
-            raise ValueError("Image too large (limit 16 MB).")
-        out_dir = temp_dir or tempfile.gettempdir()
-        os.makedirs(out_dir, exist_ok=True)
-        ext = _detect_image_ext(raw)
-        if filename:
-            base_stem = os.path.splitext(filename)[0]
-            name = base_stem + (ext if ext in (".gif", ".webp") else ".png")
+    out_root = persist_dir or temp_dir or tempfile.gettempdir()
+    assets_dir = os.path.join(out_root, "assets") if persist_dir else out_root
+
+    # 1. Background image / GIF
+    bg = cfg_copy.get("background")
+    if isinstance(bg, dict):
+        img_b64 = bg.pop("image_data", None)
+        if bg.get("mode") in ("image", "animated_gif") and img_b64:
+            if persist_dir:
+                for old_ext in (".png", ".jpg", ".gif", ".webp"):
+                    old_p = os.path.join(persist_dir, "source" + old_ext)
+                    if os.path.exists(old_p):
+                        try:
+                            os.remove(old_p)
+                        except OSError:
+                            pass
+                stem = "source"
+            else:
+                stem = os.path.splitext(filename)[0] if filename else f"studio_source_{uuid.uuid4().hex[:10]}"
+            bg["image_path"] = _write_data_url_asset(img_b64, out_root, stem)
         else:
-            name = f"studio_source_{uuid.uuid4().hex}{ext}"
-        img_path = os.path.join(out_dir, name)
-        with open(img_path, "wb") as f:
-            f.write(raw)
-        bg["image_path"] = img_path
+            existing = _safe_existing_asset(bg.get("image_path"), persist_dir)
+            if existing:
+                bg["image_path"] = existing
+            elif persist_dir and bg.get("mode") in ("image", "animated_gif"):
+                bg.pop("image_path", None)
+                for cand in ("source.gif", "source.webp", "source.png", "source.jpg"):
+                    cp = os.path.join(persist_dir, cand)
+                    if os.path.isfile(cp):
+                        bg["image_path"] = cp
+                        break
+            else:
+                bg.pop("image_path", None)
+
+    # 2. Tap-to-Switch custom scene frames (01 1a)
+    ts = cfg_copy.get("tap_switch")
+    if isinstance(ts, dict) and isinstance(ts.get("frames"), list):
+        for idx, fr in enumerate(ts["frames"][:6]):
+            if not isinstance(fr, dict):
+                continue
+            b64 = fr.pop("image_data", None)
+            if b64:
+                stem = f"tap_{idx}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"tap_{idx}"
+                fr["image_path"] = _write_data_url_asset(b64, assets_dir, stem)
+            else:
+                existing = _safe_existing_asset(fr.get("image_path"), persist_dir)
+                if existing:
+                    fr["image_path"] = existing
+                else:
+                    fr.pop("image_path", None)
+
+    # 3. Custom Analog Hands + Center Cap PNGs (01 0a / 01 00)
+    hands = cfg_copy.get("analog_hands")
+    if isinstance(hands, dict):
+        for role in ("hour", "min", "sec", "cap"):
+            dk = f"{role}_image_data"
+            pk = f"{role}_image_path"
+            b64 = hands.pop(dk, None)
+            if b64:
+                stem = f"hand_{role}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"hand_{role}"
+                hands[pk] = _write_data_url_asset(b64, assets_dir, stem)
+            else:
+                existing = _safe_existing_asset(hands.get(pk), persist_dir)
+                if existing:
+                    hands[pk] = existing
+                else:
+                    hands.pop(pk, None)
+
+    # 4. Custom PNG Overlay / Sticker layers (01 00)
+    overlays = cfg_copy.get("overlays")
+    if isinstance(overlays, list):
+        for idx, ov in enumerate(overlays[:12]):
+            if not isinstance(ov, dict):
+                continue
+            b64 = ov.pop("image_data", None)
+            oid = slugify(str(ov.get("id") or f"ov_{idx + 1}"))
+            if b64:
+                stem = f"overlay_{oid}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"overlay_{oid}"
+                ov["image_path"] = _write_data_url_asset(b64, assets_dir, stem)
+            else:
+                existing = _safe_existing_asset(ov.get("image_path"), persist_dir)
+                if existing:
+                    ov["image_path"] = existing
+                else:
+                    ov.pop("image_path", None)
+
+    # 5. Multi-Zone Animated Sprites (01 2e)
+    anims = cfg_copy.get("anim_sprites")
+    if isinstance(anims, list):
+        for idx, sp in enumerate(anims[:4]):
+            if not isinstance(sp, dict):
+                continue
+            b64 = sp.pop("image_data", None)
+            aid = slugify(str(sp.get("id") or f"anim_{idx + 1}"))
+            if b64:
+                stem = f"anim_{aid}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"anim_{aid}"
+                sp["image_path"] = _write_data_url_asset(b64, assets_dir, stem)
+            else:
+                existing = _safe_existing_asset(sp.get("image_path"), persist_dir)
+                if existing:
+                    sp["image_path"] = existing
+                else:
+                    sp.pop("image_path", None)
+
     return cfg_copy
+
+
+resolve_config_image = resolve_config_assets
+
+
+def hydrate_config_assets(cfg, pdir):
+    """Inline all saved preset image files back into `*_image_data` data URLs for editing in Studio."""
+    out = json.loads(json.dumps(cfg))
+
+    # Background source.*
+    bg = out.setdefault("background", {})
+    for cand in ("source.gif", "source.webp", "source.png", "source.jpg"):
+        src_img = os.path.join(pdir, cand)
+        if os.path.isfile(src_img):
+            data_url = _file_to_data_url(src_img)
+            if data_url:
+                bg["image_data"] = data_url
+            break
+
+    def resolve_in_pdir(path_val):
+        if not isinstance(path_val, str) or not path_val:
+            return None
+        if os.path.isfile(path_val) and _path_within(path_val, pdir):
+            return path_val
+        # Fallback to matching basename under pdir/assets/
+        base = os.path.basename(path_val)
+        cand = os.path.join(pdir, "assets", base)
+        if os.path.isfile(cand) and _path_within(cand, pdir):
+            return cand
+        return None
+
+    ts = out.get("tap_switch")
+    if isinstance(ts, dict) and isinstance(ts.get("frames"), list):
+        for fr in ts["frames"]:
+            if isinstance(fr, dict):
+                rp = resolve_in_pdir(fr.get("image_path"))
+                if rp:
+                    fr["image_data"] = _file_to_data_url(rp)
+
+    hands = out.get("analog_hands")
+    if isinstance(hands, dict):
+        for role in ("hour", "min", "sec", "cap"):
+            rp = resolve_in_pdir(hands.get(f"{role}_image_path"))
+            if rp:
+                hands[f"{role}_image_data"] = _file_to_data_url(rp)
+
+    for list_key in ("overlays", "anim_sprites"):
+        items = out.get(list_key)
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict):
+                    rp = resolve_in_pdir(it.get("image_path"))
+                    if rp:
+                        it["image_data"] = _file_to_data_url(rp)
+
+    return out
+
+
+def rebase_config_paths(cfg, new_dir):
+    """Update stored image_path fields in a duplicated/imported preset config to point inside new_dir."""
+    out = json.loads(json.dumps(cfg))
+
+    def map_path(old_p, check_root=True):
+        if not isinstance(old_p, str) or not old_p:
+            return old_p
+        base = os.path.basename(old_p)
+        if check_root:
+            p_root = os.path.join(new_dir, base)
+            if os.path.isfile(p_root):
+                return p_root
+        p_asset = os.path.join(new_dir, "assets", base)
+        if os.path.isfile(p_asset):
+            return p_asset
+        return old_p
+
+    if isinstance(out.get("background"), dict) and out["background"].get("image_path"):
+        out["background"]["image_path"] = map_path(out["background"]["image_path"], check_root=True)
+    if isinstance(out.get("tap_switch"), dict) and isinstance(out["tap_switch"].get("frames"), list):
+        for fr in out["tap_switch"]["frames"]:
+            if isinstance(fr, dict) and fr.get("image_path"):
+                fr["image_path"] = map_path(fr["image_path"], check_root=False)
+    if isinstance(out.get("analog_hands"), dict):
+        for role in ("hour", "min", "sec", "cap"):
+            pk = f"{role}_image_path"
+            if out["analog_hands"].get(pk):
+                out["analog_hands"][pk] = map_path(out["analog_hands"][pk], check_root=False)
+    for list_key in ("overlays", "anim_sprites"):
+        if isinstance(out.get(list_key), list):
+            for it in out[list_key]:
+                if isinstance(it, dict) and it.get("image_path"):
+                    it["image_path"] = map_path(it["image_path"], check_root=False)
+    return out
 
 
 def default_config_for(pid, meta):
@@ -332,7 +616,8 @@ def default_config_for(pid, meta):
             "digital_clock": {"enabled": False},
             "analog_hands": {"enabled": True, "style": "omnitrix", "color": "#39ff14",
                              "accent_color": "#ebffe6", "show_seconds": True, "center_cap": False},
-            "battery": {"enabled": True, "style": "ring", "color": "#39ff14", "thickness": 6},
+            "gauges": [{"id": "g1", "enabled": True, "kind": "progress", "metric": "battery",
+                        "style": "ring", "color": "#39ff14", "thickness": 6, "radius_inset": 4}],
             "weekday": {"enabled": False},
         }
     src_img = os.path.join(PRESETS_DIR, pid, "source.png")
@@ -343,7 +628,7 @@ def default_config_for(pid, meta):
         "background": {"mode": "image", "image_path": src_img, "brightness": 100, "vignette": 0},
         "digital_clock": {"enabled": False},
         "analog_hands": {"enabled": False},
-        "battery": {"enabled": False},
+        "gauges": [],
         "weekday": {"enabled": False},
     }
 
@@ -353,7 +638,7 @@ def default_config_for(pid, meta):
 # --------------------------------------------------------------------------- #
 
 class StudioHandler(BaseHTTPRequestHandler):
-    server_version = "Studio/1.0"
+    server_version = "Studio/2.0"
 
     def log_message(self, fmt, *args):
         if os.environ.get("STUDIO_LOG"):
@@ -390,7 +675,7 @@ class StudioHandler(BaseHTTPRequestHandler):
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length > MAX_JSON_BODY:
-            raise ValueError("Request too large (limit 32 MB).")
+            raise ValueError("Request too large (limit 64 MB).")
         raw = self.rfile.read(length) if length > 0 else b"{}"
         return json.loads(raw.decode("utf-8"))
 
@@ -444,13 +729,8 @@ class StudioHandler(BaseHTTPRequestHandler):
                 inner = cfg.pop("config")
                 for k, v in inner.items():
                     cfg.setdefault(k, v)
-            for cand_name, mime in (("source.gif", "image/gif"), ("source.webp", "image/webp"), ("source.png", "image/png")):
-                src_img = os.path.join(pdir, cand_name)
-                if os.path.exists(src_img):
-                    with open(src_img, "rb") as f:
-                        cfg.setdefault("background", {})["image_data"] = f"data:{mime};base64," + base64.b64encode(f.read()).decode("ascii")
-                    break
-            self.send_json({"ok": True, "id": pid, "name": meta.get("name", pid), "config": cfg})
+            hydrated = hydrate_config_assets(cfg, pdir)
+            self.send_json({"ok": True, "id": pid, "name": meta.get("name", pid), "config": hydrated})
         elif path == "/api/preset-bundle":
             qs = urllib.parse.parse_qs(parsed.query)
             pid = qs.get("id", [""])[0]
@@ -465,6 +745,12 @@ class StudioHandler(BaseHTTPRequestHandler):
                         fpath = os.path.join(pdir, fname)
                         if os.path.isfile(fpath):
                             zf.write(fpath, arcname=fname)
+                    adir = os.path.join(pdir, "assets")
+                    if os.path.isdir(adir):
+                        for af in sorted(os.listdir(adir)):
+                            afp = os.path.join(adir, af)
+                            if os.path.isfile(afp) and os.path.splitext(af)[1].lower() in SAFE_ASSET_EXTS:
+                                zf.write(afp, arcname=f"assets/{af}")
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 500)
                 return
@@ -496,7 +782,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             try:
                 cfg = body.get("config", {})
                 with tempfile.TemporaryDirectory(prefix="studio_preview_") as td:
-                    resolved = resolve_config_image(cfg, temp_dir=td)
+                    resolved = resolve_config_assets(cfg, temp_dir=td)
                     anim_frames, dur_ms = render_config_animated_preview(resolved)
                     if anim_frames and len(anim_frames) >= 2:
                         buf = io.BytesIO()
@@ -518,6 +804,29 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_bytes(buf.getvalue(), "image/png")
             except Exception as exc:
                 self.send_json({"ok": False, "error": f"Preview failed: {exc}"}, 500)
+
+        elif path == "/api/inspect-compile":
+            try:
+                cfg = body.get("config", {})
+                with tempfile.TemporaryDirectory(prefix="studio_check_") as td:
+                    resolved = resolve_config_assets(cfg, temp_dir=td)
+                    out_bin = os.path.join(td, "check.bin")
+                    compile_config_to_bin(resolved, out_bin)
+                    raw_bin = open(out_bin, "rb").read()
+                    info = inspect_watchface_bin(raw_bin)
+                self.send_json({
+                    "ok": bool(info.get("valid")),
+                    "size_bytes": info.get("size_bytes", len(raw_bin)),
+                    "size_kb": round(len(raw_bin) / 1024.0, 1),
+                    "max_kb": round(MAX_WATCH_BIN_BYTES / 1024.0, 1),
+                    "within_flash_budget": bool(info.get("within_flash_budget")),
+                    "opcodes": info.get("opcodes", []),
+                    "digit_tables": info.get("digit_tables", 0),
+                    "has_anim_header": bool(info.get("has_anim_header")),
+                    "errors": info.get("errors", []),
+                })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": f"Compile check failed: {exc}"}, 500)
 
         elif path == "/api/save-preset":
             try:
@@ -542,13 +851,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                 else:
                     pid = edit_id
 
-                resolved = resolve_config_image(cfg, temp_dir=pdir, filename="source.png")
-                if resolved.get("background", {}).get("mode") in ("image", "animated_gif") and not resolved["background"].get("image_path"):
-                    for cand_name in ("source.gif", "source.webp", "source.png"):
-                        existing_src = os.path.join(pdir, cand_name)
-                        if os.path.exists(existing_src):
-                            resolved["background"]["image_path"] = existing_src
-                            break
+                resolved = resolve_config_assets(cfg, persist_dir=pdir)
 
                 bin_path = os.path.join(pdir, "watchface.bin")
                 prev_path = os.path.join(pdir, "preview.png")
@@ -580,7 +883,15 @@ class StudioHandler(BaseHTTPRequestHandler):
                         pushed = push_bin_to_phone(bin_path)
                         message = (f"Saved & pushed '{name}' ({size_kb} KB)! Open Haylou Fun → Dial Center → install any free cloud dial."
                                    if pushed else f"Saved '{name}', but the push failed — check the USB connection.")
-                self.send_json({"ok": True, "id": os.path.basename(pdir), "pushed": pushed, "size_kb": size_kb, "message": message})
+                self.send_json({
+                    "ok": True,
+                    "id": os.path.basename(pdir),
+                    "pushed": pushed,
+                    "size_kb": size_kb,
+                    "within_flash_budget": info["within_flash_budget"],
+                    "opcodes": info.get("opcodes", []),
+                    "message": message,
+                })
             except Exception as exc:
                 self.send_json({"ok": False, "error": f"Could not save: {exc}"}, 500)
 
@@ -615,6 +926,12 @@ class StudioHandler(BaseHTTPRequestHandler):
             dst_dir = os.path.join(PRESETS_DIR, new_id)
             try:
                 shutil.copytree(src_dir, dst_dir)
+                cfg_path = os.path.join(dst_dir, "config.json")
+                if os.path.isfile(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        rebased = rebase_config_paths(json.load(f), dst_dir)
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(rebased, f, indent=2)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 500)
                 return
@@ -706,8 +1023,36 @@ class StudioHandler(BaseHTTPRequestHandler):
                     os.makedirs(pdir, exist_ok=True)
                     for fname in BUNDLE_FILES:
                         if fname in names and fname != "meta.json":
-                            with open(os.path.join(pdir, fname), "wb") as f:
-                                f.write(zf.read(fname))
+                            data = zf.read(fname)
+                            if len(data) <= MAX_IMAGE_BYTES:
+                                with open(os.path.join(pdir, fname), "wb") as f:
+                                    f.write(data)
+                    # Extract safe assets/* files
+                    for entry in names:
+                        norm = entry.replace("\\", "/")
+                        if not norm.startswith("assets/") or norm.endswith("/"):
+                            continue
+                        sub = norm[len("assets/"):]
+                        if "/" in sub or ".." in sub or not sub:
+                            continue
+                        if os.path.splitext(sub)[1].lower() not in SAFE_ASSET_EXTS:
+                            continue
+                        data = zf.read(entry)
+                        if len(data) > MAX_IMAGE_BYTES:
+                            continue
+                        adir = os.path.join(pdir, "assets")
+                        os.makedirs(adir, exist_ok=True)
+                        with open(os.path.join(adir, sub), "wb") as f:
+                            f.write(data)
+                    cfg_path = os.path.join(pdir, "config.json")
+                    if os.path.isfile(cfg_path):
+                        try:
+                            with open(cfg_path, "r", encoding="utf-8") as f:
+                                rebased = rebase_config_paths(json.load(f), pdir)
+                            with open(cfg_path, "w", encoding="utf-8") as f:
+                                json.dump(rebased, f, indent=2)
+                        except Exception:
+                            pass
                     with open(os.path.join(pdir, "meta.json"), "w", encoding="utf-8") as f:
                         json.dump({"name": name, "subtitle": meta.get("subtitle", "Shared Watch 4S dial"),
                                    "created_at": int(time.time())}, f, indent=2)
@@ -795,7 +1140,8 @@ def main():
     print(f"  Haylou Watch 4S Studio running at {url}")
     print("  Press Ctrl+C to stop. Logs: set STUDIO_LOG=1")
     print("=" * 60)
-    threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    if not os.environ.get("STUDIO_NO_BROWSER") and not os.environ.get("STUDIO_NO_OPEN"):
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

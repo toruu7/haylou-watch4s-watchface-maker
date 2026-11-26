@@ -20,24 +20,32 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 ## Features
 
 - **Visual Multi-Layer Watchface Studio (`launch_studio.bat`):**
-  - Local dark-mode browser UI with a machined Watch 4S hardware preview (`466×466` pixel-exact rendering).
-  - **Direct 1:1 drag-and-drop positioning** on the watch face with magnetic center-snap guides and live coordinate HUD.
-  - **Saved Presets Library:** Save, edit, duplicate, delete, import `.bin` files, and push any preset to your phone over ADB in one click.
+  - Local dark-mode browser UI with a machined Watch 4S hardware preview (`466×466` pixel-exact rendering), live **`.bin` flash-budget & opcode checker**, and **True Z-Order Layer Stack** (drag or `↑`/`↓` reorder layers matching exact back-to-front `.bin` opcode emission).
+  - **Direct 1:1 drag-and-drop positioning** for every widget, sticker, text label, GIF zone, and telemetry sensor on the watch face with magnetic center-snap guides, arrow-key nudging, and live coordinate HUD.
+  - **Saved Presets Library:** Save, edit (with full asset re-hydration), duplicate, delete, export/import `.face.zip` packages (including all uploaded assets), import `.bin` files, and push any preset to your phone over ADB in one click.
+- **Tap-to-Switch Multi-Scene / Theme Art (`01 1a`):**
+  - Tap your watch screen to cycle between 2–6 interactive scenes: **Day/Night gradient themes**, **Ben 10 Omnitrix themes**, or **custom uploaded artwork**, with a live **"Tap Scene" preview tester** built into Studio.
+- **Procedural Bezel & Index Tick Generator (`01 00`):**
+  - 8 crisp 2×-supersampled bezel styles (**Minimal Dots**, **Classic Baton**, **Diver Watch Indices**, **Roman Numerals**, **Arabic Numerals**, **Motorsport Tachymeter**, **Neon Rings**, and **Tactical Radar HUD**) with primary/accent colors, inset, opacity, glow, and optional minute sub-ticks.
 - **Pure Image Mode (No Clock):**
   - Full-resolution `466×466` custom artwork with **zero clock digits, zero date, and zero widgets**.
 - **Pro Digital Clock & Typography:**
   - Horizontal (`HH:MM` with optional **native blinking colon**) or **Stacked Vertical** (`HH` over `MM`) layouts.
-  - Optional **Live Seconds (`01 18`)** with independent color and font size.
+  - Optional **Live Seconds (`01 18`)** and **AM / PM Indicator (`01 11`)** with independent color, size, and placement.
   - Upload any custom `.ttf` or `.otf` font directly in the Studio UI.
   - Vertical color gradients, stroke/outline, neon outer glow, and custom spacing.
-- **Hardware Animated GIF / WebP Dials (`01 2e`):**
-  - Drop any animated `.gif` or `.webp` directly into Studio to compile a native Watch 4S frame-sequence dial (full-screen `466×466` or floating circular medallion) with live animated browser preview and automatic `1.3 MB` flash-budget optimization.
-- **60Hz Rotating Analog Hands:**
-  - 4 built-in hand packs (**Omnitrix**, **Classic Needles**, **Neon Pointers**, **Minimalist Baton**) with custom colors, optional second hand, and optional center cap.
-- **Full Native Watch 4S Widgets (Verified Across 210 Official LS26 Dials):**
-  - **Live Date (`01 0f` / `01 0d`):** `MM/DD`, `DD/MM`, `MM-DD`, `DD-MM`, or `DD` with custom font, color, and drag positioning.
-  - **Live Health Telemetry:** Steps (`01 07`), Heart Rate BPM (`01 06` + `01 23` `--` dash glyph), Calories Kcal (`01 09`), Distance km/mi (`01 08` with baseline decimal dot), and Battery % (`01 15`), with Left/Right/Center alignment and optional mini metric icons.
-  - **11-Step Progress Gauges (`01 12`):** Battery (`0x06`), Steps (`0x00`), Calories (`0x02`), or Distance (`0x03`) rendered as an outer 360° ring, bottom curved arc, horizontal bar, or classic pill icon.
+- **Multi-Zone Animated GIF / WebP Dials (`01 2e`):**
+  - Drop animated `.gif` or `.webp` files as full-screen backgrounds or stack up to **3 independent floating GIF zones** at any Z-order with live animated browser preview and automatic `1.3 MB` flash-budget optimization.
+- **60Hz Rotating Analog Hands (`01 0a`) — Procedural & Custom PNG Uploads:**
+  - 7 built-in hand packs (**Omnitrix**, **Stark Arc Reactor**, **Skeleton Dauphine**, **8-Bit Pixel**, **Classic Needles**, **Neon Pointers**, **Minimalist Baton**) **plus Custom PNG Hand & Center Cap Uploads** with adjustable lengths and pivot tail %.
+- **Custom PNG Stickers & Text Labels (`01 00`):**
+  - Layer transparent PNG badges, logos, or HUD frames (with scale, rotation, opacity) and custom gradient/glow text labels anywhere in the Z-order stack.
+- **Full Native Watch 4S Widgets (Verified Byte-for-Byte Across Official LS26 Dials):**
+  - **Live Weather Icon (`01 1b`, 9 states) & Live Temperature (`01 1c`, `-`/`°C`/`°F`):** Full color, monochrome, or neon icons with live condition preview (`Sunny`, `Partly Cloudy`, `Cloudy`, `Rain`, `Snow`, `Fog`, `Wind`, `Haze`, `Unknown`).
+  - **Bluetooth Status Badge (`01 14`):** 2-state disconnected/connected indicator in 4 styles (`BT Rune`, `Pill Badge`, `Link Chain`, `Dot Ring`).
+  - **Richer Live Date & Year (`01 0e` / `01 0f` / `01 0d` / `01 10`):** `MON DD`, `DD MON`, `MON` (12-frame `JAN`–`DEC` month names), `MM/DD`, `DD/MM`, `MM-DD`, `DD-MM`, or `DD`, plus optional **4-Digit Year (`YYYY`)**.
+  - **Live Health Telemetry:** Steps (`01 07`), Heart Rate BPM (`01 06` + `01 23` `--` dash glyph), Calories Kcal (`01 09`), Distance (`01 08` with baseline decimal dot + dynamic **`01 1f` `km`/`mi` unit label**), and Battery % (`01 15`), with Left/Right/Center alignment and optional mini metric icons.
+  - **Multi-Gauge Stacking (`01 12`) & Native Battery Fill Bar (`01 05`):** Stack up to **4 simultaneous gauges** (Outer Ring, Inner Ring, Top/Bottom/Left/Right Curved Arcs, Horizontal Bar, Pill Icon, or Hardware-Clipped Native Battery Fill Bar `01 05`) across Battery, Steps, Calories, Distance, and Active Minutes.
   - **7-Frame Weekday Label (`01 04` `SUN`–`SAT`):** Custom font, color, uppercase toggle, and draggable position.
 - **Zero-Java Pure-Python Haylou Fun APK Patcher (`scripts/patch_and_build_apk.py`):**
   - Modular CLI patches (`--noclock`, `--unlock-cards`, `--rhr`, `--vitality-vo2`, `--night-raise-to-wake`, `--cycling-fixes`, `--workout-analytics`, `--hrv-active`, `--hourly-charts`, `--voip-calls`, `--all`) with pure-Python 4-byte/4KB alignment and APK Signature Scheme v2 & v3 signing (`cryptography`) — **no Java, `keytool`, `zipalign`, or Android SDK Build-Tools required**.
@@ -138,16 +146,19 @@ Full technical notes live in [`docs/protocol_specs.md`](docs/protocol_specs.md) 
   - `uint16` format flags (highest layout opcode ID: `0x0002` digital-only, `0x0012` gauges, `0x0018` seconds, `0x0023` telemetry dash, `0x002e` animated GIF), `uint16 0xFFFF`, `uint32 preview_offset`, `uint16 280`, `uint16 280`, `uint16 digit_table_offset`, `uint16 layout_offset`.
 - **Resource & Multiple Digit Font Tables (`dt_off..lo_off`, terminated by `00 00`):**
   - Optional 8-byte animation header (`00 02 00 00 00 02 01 00`) when `01 2e` / `01 1a` animations are present, followed by one or more 83-byte digit tables (`01 01 <id>` + `10 × <IHH`).
-- **Layout Stream Elements (back-to-front, terminated by `0x0000`):**
-  - `01 00` — Static image (`466×466` background, date separator, or hand cap)
-  - `01 2e` — Hardware animated multi-frame sprite / GIF loop (`mode, count, loop, autoplay, interval, x, y, w, h, offsets[]`)
+- **Layout Stream Elements (back-to-front Z-order, terminated by `0x0000`):**
+  - `01 00` — Static image (`466×466` background, procedural bezel/ticks, PNG stickers, custom text labels, date separator, or hand cap)
+  - `01 2e` — Hardware animated multi-frame sprite / GIF loop (1–3 independent zones: `mode, count, loop, autoplay, interval, x, y, w, h, offsets[]`)
+  - `01 1a` — Tap-to-Switch multi-scene / theme art (2–6 frames cycled on watch tap)
   - `01 02` — 4-digit digital clock (34 B: 4 digit coords + optional 12-byte blinking colon sprite)
-  - `01 18` — Live seconds (`SS`)
-  - `01 0f` / `01 0d` — Live month (`MM`) and day (`DD`)
-  - `01 06` / `01 07` / `01 08` / `01 09` / `01 15` — Live Heart Rate BPM (with `01 23` `--` dash), Steps, Distance (with `.` dot), Calories Kcal, and Battery %
-  - `01 12` — 11-frame progress gauges (`sub`: `0x06` Battery, `0x00` Steps, `0x02` Calories, `0x03` Distance)
+  - `01 18` — Live seconds (`SS`) · `01 11` — AM/PM indicator
+  - `01 0f` / `01 0d` / `01 0e` / `01 10` — Live month (`MM`), day (`DD`), 12-frame month name (`JAN`–`DEC`), and 4-digit year (`YYYY`)
+  - `01 1b` / `01 1c` — Live 9-state Weather icon & Temperature (`-` / `°C` / `°F`)
+  - `01 14` — 2-state Bluetooth connection badge (`s0`=disconnected, `s1`=connected)
+  - `01 06` / `01 07` / `01 08` / `01 09` / `01 15` / `01 1f` — Live Heart Rate BPM (with `01 23` `--` dash), Steps, Distance (with `.` dot + dynamic `km`/`mi` unit), Calories Kcal, and Battery %
+  - `01 12` / `01 05` — 11-frame stackable progress gauges (`sub`: `0x06` Battery, `0x00` Steps, `0x02` Calories, `0x03` Distance, `0x05` Active) + native hardware-clipped dynamic battery fill bar
   - `01 04 01` — 7-frame weekday (`SUN..SAT`)
-  - `01 0a <0|1|2>` — 60Hz rotating analog Hour (`0`), Minute (`1`), and Second (`2`) hands pivoted around `(233, 233)`
+  - `01 0a <0|1|2>` — 60Hz rotating analog Hour (`0`), Minute (`1`), and Second (`2`) hands (procedural or custom PNG) pivoted around `(233, 233)`
 - **Pixel Codec (ARGB565 + Per-Row RLE):**
   - Each image begins with `height × uint32` row entries: `(row_byte_len << 21) | (row_byte_offset & 0x1FFFFF)`.
   - Each pixel is 3 bytes: `[Alpha, RGB565_hi, RGB565_lo]`.
