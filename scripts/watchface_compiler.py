@@ -1721,21 +1721,32 @@ def build_battery_widget(batt_cfg):
     frames = []
 
     if style == "omnitrix_low_red":
-        # Auto-shift full faceplate to Red Timeout Omnitrix when battery < threshold_pct (default 50%).
-        # Uses supplied `image_path` (e.g. transparent-bezel Red Timeout layer) when provided,
-        # otherwise draws a clean RLE-compact Alien Force Red Timeout Omnitrix faceplate.
+        # Auto-shift faceplate to Red Timeout Omnitrix when battery < threshold_pct (default 50%).
+        # Supports optional `image_path` (low-batt red layer), `green_image_path` (normal >=threshold layer),
+        # and `include_ring=True` (bakes the live 360° green/red outer battery ring into the SAME
+        # single `01 12 sub=0x06` opcode — required because Watch 4S only allows one `01 12` per sub ID!).
         threshold_pct = max(10, min(90, int(batt_cfg.get("threshold_pct", 50))))
         brightness = float(batt_cfg.get("brightness", 90))
-        img_path = batt_cfg.get("image_path")
-        red_img = None
-        if img_path and os.path.isfile(img_path):
-            try:
-                with Image.open(img_path) as im:
-                    red_img = _prepare_circular_pil(im.convert("RGBA"), W, circular=True)
-                    if brightness < 99.5:
-                        red_img = apply_amoled_dimmer(red_img, brightness, 0)
-            except Exception:
-                red_img = None
+        include_ring = bool(batt_cfg.get("include_ring", False))
+        ring_thick = max(3, min(14, int(batt_cfg.get("thickness", 6))))
+        ring_inset = max(2, min(40, int(batt_cfg.get("radius_inset", 4))))
+        red_rgb = _safe_hex_rgb(batt_cfg.get("color", "#ff1818"), (255, 24, 24))
+        green_rgb = _safe_hex_rgb(batt_cfg.get("green_color", "#39ff14"), (57, 255, 20))
+        track_rgb = _safe_hex_rgb(batt_cfg.get("track_color", "#161a1e"), (22, 26, 30))
+
+        def _load_layer(path_val):
+            if path_val and os.path.isfile(path_val):
+                try:
+                    with Image.open(path_val) as im:
+                        out_im = _prepare_circular_pil(im.convert("RGBA"), W, circular=True)
+                        if brightness < 99.5:
+                            out_im = apply_amoled_dimmer(out_im, brightness, 0)
+                        return out_im
+                except Exception:
+                    return None
+            return None
+
+        red_img = _load_layer(batt_cfg.get("image_path"))
         if red_img is None:
             omni_style = batt_cfg.get("omni_style", "alien_force")
             if omni_style not in ("alien_force", "os", "omniverse", "5yl"):
@@ -1746,9 +1757,23 @@ def build_battery_widget(batt_cfg):
             red_img = draw_omnitrix_bg(style=omni_style, palette=palette_from_hex(red_hex), show_ticks=ticks, glow_strength=glow)
             red_img = apply_amoled_dimmer(red_img, brightness, 0)
             red_img = _posterize_for_rle(_prepare_circular_pil(red_img, W, circular=True), bits=4)
-        blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+        high_img = _load_layer(batt_cfg.get("green_image_path"))
+        if high_img is None:
+            high_img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+        bbox = (ring_inset, ring_inset, W - 1 - ring_inset, H - 1 - ring_inset)
         for step in range(11):
-            frames.append(red_img if (step * 10 < threshold_pct) else blank)
+            is_low = (step * 10 < threshold_pct)
+            fr = (red_img if is_low else high_img).copy()
+            if include_ring:
+                d = ImageDraw.Draw(fr)
+                d.arc(bbox, start=-90, end=270, fill=(*track_rgb, 255), width=ring_thick)
+                if step > 0:
+                    sweep = int(360 * step / 10)
+                    col = red_rgb if is_low else green_rgb
+                    d.arc(bbox, start=-90, end=-90 + sweep, fill=(*col, 255), width=ring_thick)
+            frames.append(fr)
         return 0, 0, frames
 
     if style == "ring_mask":

@@ -554,23 +554,24 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
                 else:
                     sp.pop("image_path", None)
 
-    # 6. Optional Gauge Overlay Images (e.g. omnitrix_low_red transparent-bezel Red Timeout)
+    # 6. Optional Gauge Overlay Images (e.g. omnitrix_low_red Red/Green Omnitrix layers)
     gauges = cfg_copy.get("gauges")
     if isinstance(gauges, list):
         for idx, g in enumerate(gauges[:4]):
             if not isinstance(g, dict):
                 continue
-            b64 = g.pop("image_data", None)
             gid = slugify(str(g.get("id") or f"g_{idx + 1}"))
-            if b64:
-                stem = f"gauge_{gid}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"gauge_{gid}"
-                g["image_path"] = _write_data_url_asset(b64, assets_dir, stem)
-            else:
-                existing = _safe_existing_asset(g.get("image_path"), persist_dir)
-                if existing:
-                    g["image_path"] = _persist_existing_asset(existing, persist_dir, assets_dir)
+            for dk, pk in (("image_data", "image_path"), ("green_image_data", "green_image_path")):
+                b64 = g.pop(dk, None)
+                if b64:
+                    stem = f"gauge_{gid}_{pk}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"gauge_{gid}_{pk}"
+                    g[pk] = _write_data_url_asset(b64, assets_dir, stem)
                 else:
-                    g.pop("image_path", None)
+                    existing = _safe_existing_asset(g.get(pk), persist_dir)
+                    if existing:
+                        g[pk] = _persist_existing_asset(existing, persist_dir, assets_dir)
+                    else:
+                        g.pop(pk, None)
 
     return cfg_copy
 
@@ -662,8 +663,10 @@ def rebase_config_paths(cfg, new_dir):
     for list_key in ("overlays", "anim_sprites", "gauges"):
         if isinstance(out.get(list_key), list):
             for it in out[list_key]:
-                if isinstance(it, dict) and it.get("image_path"):
-                    it["image_path"] = map_path(it["image_path"], check_root=False)
+                if isinstance(it, dict):
+                    for pk in ("image_path", "green_image_path"):
+                        if it.get(pk):
+                            it[pk] = map_path(it[pk], check_root=False)
     return out
 
 

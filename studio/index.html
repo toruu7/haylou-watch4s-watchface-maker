@@ -2923,34 +2923,32 @@
       } else if (t === "alien_force_holograms") {
         document.getElementById("presetName").value = "Alien Force Holograms";
         loadConfigIntoUI({
-          layer_order: ["background", "gauge:g_low_red", "tap_switch", "gauge:g_batt_ring", "hands"],
+          layer_order: ["background", "gauge:g_low_red", "tap_switch", "hands"],
           background: {
             mode: "image",
-            image_path: "builtin://alien_force_holograms/bg_omnitrix_green.png",
+            image_path: "builtin://alien_force_holograms/bg_bezel.png",
             color: "#000000", color2: "#000000", brightness: 100, vignette: 0
           },
           tap_switch: {
             enabled: true, mode: "custom_images", size: 466, circular: true, opacity: 100, brightness: 100,
             x: 233, y: 233, preview_index: 0,
             frames: [
-              { label: "Omnitrix (<50% Auto-Red)", image_path: "builtin://alien_force_holograms/ts_00_clear.png",       thumb_url: "/builtin-assets/alien_force_holograms/bg_omnitrix_green.png" },
-              { label: "Swampfire",                image_path: "builtin://alien_force_holograms/ts_01_swampfire.png",   thumb_url: "/builtin-assets/alien_force_holograms/ts_01_swampfire.png" },
-              { label: "Humungousaur",             image_path: "builtin://alien_force_holograms/ts_02_humungousaur.png",thumb_url: "/builtin-assets/alien_force_holograms/ts_02_humungousaur.png" },
-              { label: "Big Chill",                image_path: "builtin://alien_force_holograms/ts_03_bigchill.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_03_bigchill.png" },
-              { label: "Jetray",                   image_path: "builtin://alien_force_holograms/ts_04_jetray.png",      thumb_url: "/builtin-assets/alien_force_holograms/ts_04_jetray.png" },
-              { label: "Echo Echo",                image_path: "builtin://alien_force_holograms/ts_05_echoecho.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_05_echoecho.png" },
-              { label: "Timeout Red",              image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png", thumb_url: "/builtin-assets/alien_force_holograms/ts_06_timeout_red.png" }
+              { label: "Omnitrix (<50% Auto-Red)", image_path: "builtin://alien_force_holograms/ts_00_clear.png",        thumb_url: "/builtin-assets/alien_force_holograms/omnitrix_green_core.png" },
+              { label: "Swampfire",                image_path: "builtin://alien_force_holograms/ts_01_swampfire.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_01_swampfire.png" },
+              { label: "Humungousaur",             image_path: "builtin://alien_force_holograms/ts_02_humungousaur.png", thumb_url: "/builtin-assets/alien_force_holograms/ts_02_humungousaur.png" },
+              { label: "Big Chill",                image_path: "builtin://alien_force_holograms/ts_03_bigchill.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_03_bigchill.png" },
+              { label: "Jetray",                   image_path: "builtin://alien_force_holograms/ts_04_jetray.png",       thumb_url: "/builtin-assets/alien_force_holograms/ts_04_jetray.png" },
+              { label: "Echo Echo",                image_path: "builtin://alien_force_holograms/ts_05_echoecho.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_05_echoecho.png" }
             ]
           },
           gauges: [
             {
               id: "g_low_red", enabled: true, kind: "progress", metric: "battery", style: "omnitrix_low_red",
-              omni_style: "alien_force", color: "#ff1818", threshold_pct: 50, omni_glow: 1.0, omni_ticks: true,
-              brightness: 100, image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png"
-            },
-            {
-              id: "g_batt_ring", enabled: true, kind: "progress", metric: "battery", style: "ring_mask",
-              color: "#161a1e", thickness: 8, radius_inset: 3
+              omni_style: "alien_force", color: "#ff1818", green_color: "#39ff14", track_color: "#161a1e",
+              threshold_pct: 50, include_ring: true, thickness: 6, radius_inset: 4,
+              omni_glow: 1.0, omni_ticks: true, brightness: 100,
+              image_path: "builtin://alien_force_holograms/omnitrix_red_core.png",
+              green_image_path: "builtin://alien_force_holograms/omnitrix_green_core.png"
             }
           ],
           analog_hands: { enabled: true, style: "omnitrix_glass", color: "#d8e2ec", accent_color: "#ffffff", show_seconds: true, center_cap: false },
