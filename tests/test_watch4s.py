@@ -96,6 +96,33 @@ class TestWatchfaceCompiler(unittest.TestCase):
         self.assertGreater(len(blob), 32 * 4)
         self.assertEqual(len(blob) % 4, 0)
 
+    def test_builtin_pipboy_3000_template_compiles_under_budget(self):
+        bg = os.path.join(REPO_ROOT, "studio", "assets", "pipboy_3000", "bg_pipboy_3000.png")
+        self.assertTrue(os.path.isfile(bg))
+        cfg = {
+            "background": {"mode": "image", "image_path": bg, "brightness": 100, "vignette": 0},
+            "weekday": {"enabled": True, "x": 233, "y": 36, "font_size": 28, "color": "#08f57c", "stroke_width": 0, "uppercase": True},
+            "date": {"enabled": True, "format": "DD/MM", "show_year": True, "x": 125, "y": 90, "font_size": 18, "color": "#08f57c", "stroke_width": 0},
+            "weather": {"enabled": True, "show_icon": True, "icon_style": "mono", "icon_color": "#08f57c", "icon_size": 30, "icon_x": 332, "icon_y": 92, "show_temp": True, "temp_x": 386, "temp_y": 92, "font_size": 22, "color": "#08f57c", "stroke_width": 0},
+            "digital_clock": {"enabled": True, "layout": "stacked", "x": 374, "y": 232, "font_size": 82, "color": "#08f57c", "color2": "#02d466", "stroke_width": 0, "glow_radius": 1, "spacing": 12, "show_colon": False, "show_seconds": True, "seconds_x": 376, "seconds_y": 348, "seconds_size": 22, "seconds_color": "#08f57c", "show_ampm": True, "ampm_x": 376, "ampm_y": 376, "ampm_size": 20, "ampm_color": "#08f57c"},
+            "gauges": [
+                {"id": "g_kcal", "enabled": True, "metric": "calories", "style": "bar", "x": 134, "y": 166, "width": 86, "height": 10, "color": "#08f57c", "track_color": "#062614"},
+                {"id": "g_hr",   "enabled": True, "metric": "active",   "style": "bar", "x": 122, "y": 230, "width": 84, "height": 10, "color": "#08f57c", "track_color": "#062614"},
+                {"id": "g_dist", "enabled": True, "metric": "distance", "style": "bar", "x": 134, "y": 294, "width": 86, "height": 10, "color": "#08f57c", "track_color": "#062614"},
+                {"id": "g_step", "enabled": True, "metric": "steps",    "style": "bar", "x": 233, "y": 344, "width": 84, "height": 10, "color": "#08f57c", "track_color": "#062614"},
+            ],
+            "telemetry": {"enabled": True, "show_icons": False, "font_size": 22, "color": "#08f57c", "stroke_width": 0, "calories": {"enabled": True, "x": 56, "y": 158, "align": 2}, "heart_rate": {"enabled": True, "x": 44, "y": 222, "align": 2}, "distance": {"enabled": True, "x": 56, "y": 286, "align": 2}, "battery_pct": {"enabled": True, "x": 94, "y": 374, "align": 2}, "steps": {"enabled": True, "x": 233, "y": 372, "align": 2}},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "pipboy3000.bin")
+            watchface_compiler.compile_config_to_bin(cfg, out)
+            with open(out, "rb") as f:
+                raw = f.read()
+            info = watchface_compiler.inspect_watchface_bin(raw)
+            self.assertTrue(info["valid"], info.get("errors"))
+            self.assertTrue(info["within_flash_budget"])
+            self.assertLessEqual(len(raw), watchface_compiler.MAX_WATCH_BIN_BYTES)
+
 
 class TestDexAndApkSigner(unittest.TestCase):
     def test_dex_checksum_recomputation(self):
