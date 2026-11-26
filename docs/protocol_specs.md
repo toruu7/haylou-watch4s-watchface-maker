@@ -78,6 +78,7 @@ Verified across **210 / 210** official Haylou Watch 4S (`LS26001`) cloud watchfa
   ```
   00 02 00 00 00 02 01 00
   ```
+  Across all 211 official Watch 4S (`LS26`) dials, whenever this prefix is emitted at `0x10`, at least one digit table (`DT#0`) follows before the `00 00` terminator (for analog-only `01 1a` / `01 2e` dials without digital numbers, the compiler emits a tiny transparent `4×4` dummy `DT#0`).
 - **Multiple Digit Font Tables (`01 01 <id>`, 83 bytes each):** Watch 4S supports multiple independent digit sets (`DT#0..DT#N`), allowing Clock, Date, Seconds, Steps, Heart Rate, Calories, Distance, and Battery % to each use distinct fonts, sizes, and colors:
   - Header (3 bytes): `0x01, 0x01, table_id` (`0, 1, 2, ...`)
   - 10 glyph descriptors (`80` bytes): `10 × <IHH` (`offset:u32, w:u16, h:u16`) for digits `0` through `9`.

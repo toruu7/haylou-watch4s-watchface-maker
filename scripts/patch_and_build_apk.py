@@ -446,17 +446,63 @@ def patch_classes6_sideload(dex_bytes: bytes, mode: str = "sideload") -> bytes:
     capture_bytes[2] = 0xAD  # getFilesDir() -> getExternalCacheDir()
     capture_bytes = bytes(capture_bytes)
 
+    # Free-space check in CrpWatchControlHelper.a (w=0x0046..0x0070, 86 bytes at 0x260868):
+    # Stock code compares watchFreeSpace against cloudDialByteArray.length (v15), so tapping
+    # a small cloud dial (e.g. 200 KB) skips auto-deleting old watchfaces even when our
+    # sideloaded ls25plate.bin is larger (e.g. 589 KB) -> watch aborts at 0% with error code 3.
+    # In sideload mode, compare watchFreeSpace against (ls25plate.bin.length() + 4096) instead
+    # (falling back to v15.length if ls25plate.bin is missing), so old dials are freed cleanly.
+    space_off = 0x260868
+    orig_space_bytes = bytes.fromhex(
+        "6e 10 ee 0d 0c 00 0a 02 71 10 d4 ee 0d 00 0c 03 "
+        "22 09 1f 30 1a 0a 31 73 70 20 d0 eb a9 00 6e 20 "
+        "d6 eb 29 00 1a 02 0b 06 6e 20 d9 eb 29 00 6e 20 "
+        "d9 eb 39 00 6e 20 d9 eb 89 00 6e 10 e1 eb 09 00 "
+        "0c 02 71 20 d4 f2 42 00 6e 10 ee 0d 0c 00 0a 02 "
+        "21 f3 36 32 66 00"
+    )
+    sideload_space_bytes = bytes([
+        0x71, 0x00, 0x6A, 0x37, 0x00, 0x00,  # 0046: invoke-static {}, HyApplication.getContext()
+        0x0C, 0x02,                          # 0049: move-result-object v2
+        0x38, 0x02, 0x19, 0x00,              # 004a: if-eqz v2, -> 0063 (fallback)
+        0x6E, 0x10, 0xAD, 0x01, 0x02, 0x00,  # 004c: invoke-virtual {v2}, Context.getExternalCacheDir()
+        0x0C, 0x02,                          # 004f: move-result-object v2
+        0x38, 0x02, 0x13, 0x00,              # 0050: if-eqz v2, -> 0063 (fallback)
+        0x1A, 0x03, 0x5A, 0x9D,              # 0052: const-string v3, "ls25plate.bin"
+        0x22, 0x09, 0xDD, 0x2F,              # 0054: new-instance v9, Ljava/io/File;
+        0x70, 0x30, 0xB3, 0xEA, 0x29, 0x03,  # 0056: invoke-direct {v9, v2, v3}, File.<init>(File, String)V
+        0x6E, 0x10, 0xC6, 0xEA, 0x09, 0x00,  # 0059: invoke-virtual {v9}, File.length()J
+        0x0B, 0x09,                          # 005c: move-result-wide v9 (v9:v10)
+        0x84, 0x93,                          # 005d: long-to-int v3, v9
+        0x3B, 0x03, 0x05, 0x00,              # 005e: if-lez v3, -> 0063 (fallback if missing/empty)
+        0xD0, 0x33, 0x00, 0x10,              # 0060: add-int/lit16 v3, v3, 4096 (4KB flash sector margin)
+        0x28, 0x02,                          # 0062: goto -> 0064
+        0x21, 0xF3,                          # 0063: array-length v3, v15 (fallback to cloud dial size)
+        0x6E, 0x10, 0xEE, 0x0D, 0x0C, 0x00,  # 0064: invoke-virtual {v12}, getWatchFaceMaxSize()I
+        0x0A, 0x02,                          # 0067: move-result v2
+        0x36, 0x32, 0x6D, 0x00,              # 0068: if-gt v2, v3, -> 00d5 (enough room -> sendPlate!)
+        0x28, 0x07,                          # 006a: goto -> 0071 (delete oldest watchface!)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 006b..006d: nop
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  # 006e..0070: nop
+    ])
+    assert len(orig_space_bytes) == 86 and len(sideload_space_bytes) == 86
+
     cur = bytes(data[off : off + 28])
+    cur_space = bytes(data[space_off : space_off + 86])
     target = capture_bytes if mode == "capture" else sideload_bytes
-    if cur == target:
+    target_space = orig_space_bytes if mode == "capture" else sideload_space_bytes
+    if cur == target and cur_space == target_space:
         print(f"[*] classes6.dex watchface path ({mode}): already patched [skip].")
         return bytes(data)
 
     if cur not in (orig_expected, sideload_bytes, capture_bytes):
         raise RuntimeError(f"Unexpected bytes at classes6.dex 0x{off:x}: {cur.hex()}")
+    if cur_space not in (orig_space_bytes, sideload_space_bytes):
+        raise RuntimeError(f"Unexpected bytes at classes6.dex 0x{space_off:x}: {cur_space.hex()}")
 
-    print(f"[*] Patching classes6.dex (watchface {mode.upper()} mode for ls25plate.bin)...")
+    print(f"[*] Patching classes6.dex (watchface {mode.upper()} mode + ls25plate.bin free-space check)...")
     data[off : off + 28] = target
+    data[space_off : space_off + 86] = target_space
     out = recompute_dex_checksums(data)
     print(f"[+] classes6.dex watchface patch applied (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
     return out

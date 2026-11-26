@@ -2555,6 +2555,14 @@ def compile_config_to_bin(config, out_bin_path, save_preview_path=None):
                         "kind": "static", "x": 0, "y": 0, "w": W, "h": H,
                         "blob": encode_image_rle_argb565(bg_img),
                     })
+                elif full_ts and not full_bg_anim:
+                    # Emit a minimal ~4 KB pure-black 466x466 static base beneath full-screen `01 1a`
+                    # (matches official `01 1a` dial structure where `01 00` precedes `01 1a`).
+                    black_base = _build_solid_gradient_bg({"color": "#000000", "color2": "#000000"})
+                    layout_items.append({
+                        "kind": "static", "x": 0, "y": 0, "w": W, "h": H,
+                        "blob": encode_image_rle_argb565(black_base),
+                    })
                 if "bg_anim" in anim_built and "anim:bg_anim" not in order:
                     emit_anim("bg_anim")
 
@@ -2774,6 +2782,14 @@ def compile_config_to_bin(config, out_bin_path, save_preview_path=None):
                 "colon_blob": None,
             })
 
+        # Official Watch 4S (LS26) invariant (211/211 verified): whenever the 8-byte animation
+        # prefix (`00 02 00 00 00 02 01 00`) is emitted at 0x10 (for `01 1a` or `01 2e`),
+        # at least one digit table (`DT#0`) is always present before `00 00` terminator.
+        if has_anim_hdr and len(digit_tables) == 0:
+            tiny_blank = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+            tiny_blob = encode_image_rle_argb565(tiny_blank)
+            digit_tables.append([(tiny_blob, 4, 4) for _ in range(10)])
+
         return _pack_watchface_binary(
             has_anim_header=has_anim_hdr,
             digit_tables=digit_tables,
@@ -2915,6 +2931,9 @@ def inspect_watchface_bin(raw_or_path):
             errors.append(f"Unknown opcode 01 {op:02x} at 0x{p:x}")
             break
         opcodes.append(f"01 {op:02x}")
+
+    if has_anim_header and dt_count == 0:
+        errors.append("Animation header present at 0x10 with 0 digit tables (Watch 4S requires dt_cnt >= 1)")
 
     if not terminated:
         errors.append("Layout stream did not reach 00 00 terminator")

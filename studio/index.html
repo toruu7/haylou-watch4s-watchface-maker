@@ -790,7 +790,7 @@
               </div>
               <div class="prop-row">
                 <label>Diameter <span class="tabular" id="animSizeVal">466px (Full)</span></label>
-                <input type="range" id="animSize" min="140" max="466" step="6" value="466" oninput="document.getElementById('animSizeVal').textContent=(this.value>=466?'466px (Full)':this.value+'px'); syncBgUI(); schedulePreview()" />
+                <input type="range" id="animSize" min="140" max="466" step="2" value="466" oninput="document.getElementById('animSizeVal').textContent=(this.value>=466?'466px (Full)':this.value+'px'); syncBgUI(); schedulePreview()" />
               </div>
               <div style="font-size:11px; color:var(--label-tertiary);">Auto-optimizes frames under the Watch 4S 1.3 MB flash limit.</div>
             </div>
@@ -912,7 +912,7 @@
             <div class="insp-label">Geometry &amp; Placement</div>
             <div class="prop-row">
               <label>Diameter <span class="tabular" id="tsSizeVal">466px (Full)</span></label>
-              <input type="range" id="tsSize" min="120" max="466" step="6" value="466" oninput="document.getElementById('tsSizeVal').textContent=(this.value>=466?'466px (Full)':this.value+'px'); schedulePreview()" />
+              <input type="range" id="tsSize" min="120" max="466" step="2" value="466" oninput="document.getElementById('tsSizeVal').textContent=(this.value>=466?'466px (Full)':this.value+'px'); schedulePreview()" />
             </div>
             <div class="toggle-row">
               <span>Circular Mask</span>
@@ -1453,7 +1453,7 @@
             </div>
             <div class="prop-row"><label>Frames <span class="tabular" id="anFramesVal">6</span></label><input type="range" id="anFrames" min="2" max="16" value="6" oninput="document.getElementById('anFramesVal').textContent=this.value; updateActiveAnim('frames', parseInt(this.value))" /></div>
             <div class="prop-row"><label>Speed <span class="tabular" id="anFpsVal">5 fps</span></label><input type="range" id="anFps" min="1" max="12" value="5" oninput="document.getElementById('anFpsVal').textContent=this.value+' fps'; updateActiveAnim('fps', parseInt(this.value))" /></div>
-            <div class="prop-row"><label>Diameter <span class="tabular" id="anSizeVal">120px</span></label><input type="range" id="anSize" min="80" max="466" step="4" value="120" oninput="document.getElementById('anSizeVal').textContent=this.value+'px'; updateActiveAnim('size', parseInt(this.value))" /></div>
+            <div class="prop-row"><label>Diameter <span class="tabular" id="anSizeVal">120px</span></label><input type="range" id="anSize" min="80" max="466" step="2" value="120" oninput="document.getElementById('anSizeVal').textContent=this.value+'px'; updateActiveAnim('size', parseInt(this.value))" /></div>
             <div class="toggle-row"><span>Circular Mask</span><label class="switch"><input type="checkbox" id="anCirc" checked onchange="updateActiveAnim('circular', this.checked)" /><span class="switch-track"></span></label></div>
             <div class="prop-row"><label>Brightness <span class="tabular" id="anBrightVal">100%</span></label><input type="range" id="anBright" min="20" max="100" step="5" value="100" oninput="document.getElementById('anBrightVal').textContent=this.value+'%'; updateActiveAnim('brightness', parseInt(this.value))" /></div>
             <div class="prop-row"><label>X <span class="tabular" id="anXVal">233</span></label><input type="range" id="anX" min="40" max="426" value="233" oninput="document.getElementById('anXVal').textContent=this.value; updateActiveAnim('x', parseInt(this.value))" /></div>
