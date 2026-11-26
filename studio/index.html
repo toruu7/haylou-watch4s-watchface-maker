@@ -706,6 +706,7 @@
           <div class="tpl-list">
             <button class="tpl-btn" onclick="applyTemplate('tactical_hud')">Tactical Weather HUD <span class="tpl-swatch" style="background:#00e5ff"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('omni_tap')">Omnitrix · Tap-Switch <span class="tpl-swatch" style="background:#39ff14"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('alien_force_holograms')">Alien Force · 5 Holograms <span class="tpl-swatch" style="background:linear-gradient(135deg,#39ff14 55%,#ff1818 55%)"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('diver_chrono')">Diver Chronograph <span class="tpl-swatch" style="background:#f59e0b"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('fitness_hud')">Fitness HUD · All Live <span class="tpl-swatch" style="background:#38bdf8"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('stacked_neon')">Stacked Neon <span class="tpl-swatch" style="background:#00f0ff"></span></button>
@@ -1512,6 +1513,7 @@
 
     // Dynamic Multi-Instance Studio State
     let inlineBgData = "";
+    let inlineBgPath = "";
     let customHandsData = { hour: "", min: "", sec: "", cap: "" };
     let tapPreviewIndex = 0;
     let tapDayNightThemes = [
@@ -1641,8 +1643,9 @@
         const g = gaugesState.find(x => x.id === id);
         if (!g) return null;
         const isNative = g.kind === "native_battery_bar" || g.style === "native_bar";
-        const lbl = isNative ? "Batt Fill Bar (01 05)" : `Gauge · ${cap(g.metric || "battery")}`;
-        return { label: lbl, icon: isNative ? "🔋" : "◔", enabled: g.enabled !== false, removable: true };
+        const isOmniLow = g.style === "omnitrix_low_red";
+        const lbl = isNative ? "Batt Fill Bar (01 05)" : isOmniLow ? "Low-Batt Red (<50%)" : `Gauge · ${cap(g.metric || "battery")}`;
+        return { label: lbl, icon: isNative ? "🔋" : isOmniLow ? "⚡" : "◔", enabled: g.enabled !== false, removable: true };
       }
       if (tok.startsWith("overlay:")) {
         const o = overlaysState.find(x => x.id === tok.slice(8));
@@ -2170,8 +2173,8 @@
         return;
       }
       grid.innerHTML = tapCustomFrames.map((f, i) => `
-        <div class="asset-card">
-          <img src="${f.image_data}" alt="Scene ${i+1}" />
+        <div class="asset-card" title="${escapeHtml(f.label || ('Scene ' + (i+1)))}">
+          <img src="${escapeHtml(f.image_data || f.thumb_url || '')}" alt="${escapeHtml(f.label || ('Scene ' + (i+1)))}" />
           <span class="asset-idx">#${i+1}</span>
           <button type="button" class="asset-rm" onclick="tapCustomFrames.splice(${i},1); renderTapCustomGrid(); syncTapTestButton(); schedulePreview(0)">×</button>
         </div>`).join("");
@@ -2466,6 +2469,7 @@
         background: {
           mode: document.getElementById("bgMode").value,
           image_data: inlineBgData || undefined,
+          image_path: (!inlineBgData && inlineBgPath) ? inlineBgPath : undefined,
           anim_frames: parseInt(document.getElementById("animFrames").value),
           anim_fps: parseInt(document.getElementById("animFps").value),
           anim_size: parseInt(document.getElementById("animSize").value),
@@ -2639,6 +2643,7 @@
       const bg = cfg.background || {};
       document.getElementById("bgMode").value = bg.mode || "solid";
       inlineBgData = bg.image_data || "";
+      inlineBgPath = bg.image_path || "";
       setSlider("animFrames", bg.anim_frames ?? 8);
       setSlider("animFps", bg.anim_fps ?? 4, " fps");
       const asz = bg.anim_size ?? 466;
@@ -2678,7 +2683,7 @@
             { label: "Emerald Matrix", c1: "#04140a", c2: "#0d3b1e" },
             { label: "Crimson Dusk",   c1: "#170512", c2: "#3f0c2d" },
           ];
-      tapCustomFrames = Array.isArray(ts.frames) ? ts.frames.filter(f => f && f.image_data).map(f => ({ ...f })) : [];
+      tapCustomFrames = Array.isArray(ts.frames) ? ts.frames.filter(f => f && (f.image_data || f.image_path)).map(f => ({ ...f })) : [];
       syncTapUI();
 
       // Bezel
@@ -2912,6 +2917,36 @@
           bluetooth: { enabled: true, style: "dot_ring", connected_color: "#39ff14", disconnected_color: "#ff453a", size: 20, x: 233, y: 46, preview_connected: true },
           digital_clock: { enabled: false }, weekday: { enabled: false }, date: { enabled: false }
         });
+      } else if (t === "alien_force_holograms") {
+        document.getElementById("presetName").value = "Alien Force Holograms";
+        loadConfigIntoUI({
+          layer_order: ["background", "tap_switch", "gauge:g_low_red", "hands"],
+          background: {
+            mode: "image",
+            image_path: "builtin://alien_force_holograms/bg_bezel.png",
+            color: "#000000", color2: "#000000", brightness: 100, vignette: 0
+          },
+          tap_switch: {
+            enabled: true, mode: "custom_images", size: 466, circular: true, opacity: 100, brightness: 100,
+            x: 233, y: 233, preview_index: 0,
+            frames: [
+              { label: "Swampfire",    image_path: "builtin://alien_force_holograms/ts_01_swampfire.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_01_swampfire.png" },
+              { label: "Humungousaur", image_path: "builtin://alien_force_holograms/ts_02_humungousaur.png", thumb_url: "/builtin-assets/alien_force_holograms/ts_02_humungousaur.png" },
+              { label: "Big Chill",    image_path: "builtin://alien_force_holograms/ts_03_bigchill.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_03_bigchill.png" },
+              { label: "Jetray",       image_path: "builtin://alien_force_holograms/ts_04_jetray.png",       thumb_url: "/builtin-assets/alien_force_holograms/ts_04_jetray.png" },
+              { label: "Echo Echo",    image_path: "builtin://alien_force_holograms/ts_05_echoecho.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_05_echoecho.png" },
+              { label: "Timeout Red",  image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png",  thumb_url: "/builtin-assets/alien_force_holograms/ts_06_timeout_red.png" }
+            ]
+          },
+          gauges: [{
+            id: "g_low_red", enabled: true, kind: "progress", metric: "battery", style: "omnitrix_low_red",
+            omni_style: "alien_force", color: "#ff1818", threshold_pct: 50, omni_glow: 1.0, omni_ticks: true,
+            brightness: 100, image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png"
+          }],
+          analog_hands: { enabled: true, style: "omnitrix_glass", color: "#d8e2ec", accent_color: "#ffffff", show_seconds: true, center_cap: false },
+          bezel: { enabled: false }, weather: { enabled: false }, bluetooth: { enabled: false },
+          digital_clock: { enabled: false }, weekday: { enabled: false }, date: { enabled: false }, telemetry: { enabled: false }
+        });
       } else if (t === "diver_chrono") {
         document.getElementById("presetName").value = "Diver Chronograph";
         loadConfigIntoUI({
@@ -2976,7 +3011,7 @@
           weekday: { enabled: true, x: 233, y: 142, font_size: 20, color: "#e2e8f0", uppercase: true }
         });
       }
-      selectLayer(t === "omni_tap" ? "tap_switch" : "background");
+      selectLayer((t === "omni_tap" || t === "alien_force_holograms") ? "tap_switch" : "background");
       schedulePreview(0);
     }
 
@@ -3262,6 +3297,7 @@
       const r = new FileReader();
       r.onload = e => {
         inlineBgData = e.target.result;
+        inlineBgPath = "";
         document.getElementById("bgMode").value = isGif ? "animated_gif" : "image";
         syncBgUI(); schedulePreview(0);
         toast(isGif ? "Animated GIF loaded (01 2e)." : "Background image loaded.");

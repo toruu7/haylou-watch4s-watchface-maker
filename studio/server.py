@@ -29,6 +29,7 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STUDIO_DIR = os.path.dirname(os.path.abspath(__file__))
+BUILTIN_ASSETS_DIR = os.path.join(STUDIO_DIR, "assets")
 PROJECT_DIR = os.path.abspath(os.path.join(STUDIO_DIR, ".."))
 SCRIPTS_DIR = os.path.join(PROJECT_DIR, "scripts")
 PRESETS_DIR = os.path.join(PROJECT_DIR, "presets")
@@ -279,7 +280,10 @@ def summarize_config(cfg):
 
     ts = cfg.get("tap_switch", {})
     if ts.get("enabled"):
-        parts.append(f"Tap-Switch ({ts.get('mode', 'day_night').replace('_', ' ')})")
+        if ts.get("mode") == "custom_images" and isinstance(ts.get("frames"), list) and len(ts["frames"]) >= 2:
+            parts.append(f"Tap-Switch ({len(ts['frames'])} scenes)")
+        else:
+            parts.append(f"Tap-Switch ({ts.get('mode', 'day_night').replace('_', ' ')})")
 
     bz = cfg.get("bezel", {})
     if bz.get("enabled"):
@@ -313,7 +317,10 @@ def summarize_config(cfg):
     if gauges:
         if len(gauges) == 1:
             g = gauges[0]
-            parts.append(f"{g.get('metric', 'battery').capitalize()} ({g.get('style', 'ring')})")
+            if g.get("style") == "omnitrix_low_red":
+                parts.append("Low-Batt Red (<50%)")
+            else:
+                parts.append(f"{g.get('metric', 'battery').capitalize()} ({g.get('style', 'ring')})")
         else:
             parts.append(f"{len(gauges)} Gauges")
 
@@ -391,21 +398,53 @@ def _write_data_url_asset(b64_str, out_dir, stem):
     return dest
 
 
+def _resolve_builtin_asset(path):
+    """Resolve 'builtin://<relpath>' safely inside studio/assets/."""
+    if not isinstance(path, str) or not path.startswith("builtin://"):
+        return None
+    rel = path[len("builtin://"):].replace("\\", "/").lstrip("/")
+    if not rel or ".." in rel.split("/"):
+        return None
+    if os.path.splitext(rel)[1].lower() not in SAFE_ASSET_EXTS:
+        return None
+    cand = os.path.realpath(os.path.join(BUILTIN_ASSETS_DIR, *rel.split("/")))
+    if os.path.isfile(cand) and _path_within(cand, BUILTIN_ASSETS_DIR):
+        return cand
+    return None
+
+
 def _safe_existing_asset(path, persist_dir=None):
-    """Keep an existing image_path only if it lives safely inside PRESETS_DIR (or persist_dir)."""
-    if not isinstance(path, str) or not path or not os.path.isfile(path):
+    """Keep an existing image_path only if it lives safely inside PRESETS_DIR, persist_dir, or BUILTIN_ASSETS_DIR."""
+    if not isinstance(path, str) or not path:
+        return None
+    builtin = _resolve_builtin_asset(path)
+    if builtin:
+        return builtin
+    if not os.path.isfile(path):
         return None
     if persist_dir and _path_within(path, persist_dir):
         return path
-    if _path_within(path, PRESETS_DIR):
+    if _path_within(path, PRESETS_DIR) or _path_within(path, BUILTIN_ASSETS_DIR):
         return path
     return None
+
+
+def _persist_existing_asset(existing, persist_dir, target_dir, target_name=None):
+    """Copy an external/builtin existing asset into persist_dir so saved presets & .face.zip bundles are self-contained."""
+    if not existing or not persist_dir or _path_within(existing, persist_dir):
+        return existing
+    os.makedirs(target_dir, exist_ok=True)
+    name = target_name or os.path.basename(existing)
+    dest = os.path.join(target_dir, name)
+    if os.path.realpath(existing) != os.path.realpath(dest):
+        shutil.copy2(existing, dest)
+    return dest
 
 
 def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
     """
     Decode all inline base64 `*_image_data` fields (background, tap_switch frames,
-    custom analog hands/cap, PNG overlays, animated GIF zones) to files on disk
+    custom analog hands/cap, PNG overlays, animated GIF zones, gauge images) to files on disk
     and replace them with clean `*_image_path` references.
     """
     cfg_copy = json.loads(json.dumps(cfg))
@@ -432,7 +471,8 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
         else:
             existing = _safe_existing_asset(bg.get("image_path"), persist_dir)
             if existing:
-                bg["image_path"] = existing
+                ext = os.path.splitext(existing)[1].lower() or ".png"
+                bg["image_path"] = _persist_existing_asset(existing, persist_dir, out_root, target_name="source" + ext)
             elif persist_dir and bg.get("mode") in ("image", "animated_gif"):
                 bg.pop("image_path", None)
                 for cand in ("source.gif", "source.webp", "source.png", "source.jpg"):
@@ -449,6 +489,7 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
         for idx, fr in enumerate(ts["frames"][:6]):
             if not isinstance(fr, dict):
                 continue
+            fr.pop("thumb_url", None)
             b64 = fr.pop("image_data", None)
             if b64:
                 stem = f"tap_{idx}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"tap_{idx}"
@@ -456,7 +497,7 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
             else:
                 existing = _safe_existing_asset(fr.get("image_path"), persist_dir)
                 if existing:
-                    fr["image_path"] = existing
+                    fr["image_path"] = _persist_existing_asset(existing, persist_dir, assets_dir)
                 else:
                     fr.pop("image_path", None)
 
@@ -473,7 +514,7 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
             else:
                 existing = _safe_existing_asset(hands.get(pk), persist_dir)
                 if existing:
-                    hands[pk] = existing
+                    hands[pk] = _persist_existing_asset(existing, persist_dir, assets_dir)
                 else:
                     hands.pop(pk, None)
 
@@ -491,7 +532,7 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
             else:
                 existing = _safe_existing_asset(ov.get("image_path"), persist_dir)
                 if existing:
-                    ov["image_path"] = existing
+                    ov["image_path"] = _persist_existing_asset(existing, persist_dir, assets_dir)
                 else:
                     ov.pop("image_path", None)
 
@@ -509,9 +550,27 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
             else:
                 existing = _safe_existing_asset(sp.get("image_path"), persist_dir)
                 if existing:
-                    sp["image_path"] = existing
+                    sp["image_path"] = _persist_existing_asset(existing, persist_dir, assets_dir)
                 else:
                     sp.pop("image_path", None)
+
+    # 6. Optional Gauge Overlay Images (e.g. omnitrix_low_red transparent-bezel Red Timeout)
+    gauges = cfg_copy.get("gauges")
+    if isinstance(gauges, list):
+        for idx, g in enumerate(gauges[:4]):
+            if not isinstance(g, dict):
+                continue
+            b64 = g.pop("image_data", None)
+            gid = slugify(str(g.get("id") or f"g_{idx + 1}"))
+            if b64:
+                stem = f"gauge_{gid}_{uuid.uuid4().hex[:6]}" if not persist_dir else f"gauge_{gid}"
+                g["image_path"] = _write_data_url_asset(b64, assets_dir, stem)
+            else:
+                existing = _safe_existing_asset(g.get("image_path"), persist_dir)
+                if existing:
+                    g["image_path"] = _persist_existing_asset(existing, persist_dir, assets_dir)
+                else:
+                    g.pop("image_path", None)
 
     return cfg_copy
 
@@ -600,7 +659,7 @@ def rebase_config_paths(cfg, new_dir):
             pk = f"{role}_image_path"
             if out["analog_hands"].get(pk):
                 out["analog_hands"][pk] = map_path(out["analog_hands"][pk], check_root=False)
-    for list_key in ("overlays", "anim_sprites"):
+    for list_key in ("overlays", "anim_sprites", "gauges"):
         if isinstance(out.get(list_key), list):
             for it in out[list_key]:
                 if isinstance(it, dict) and it.get("image_path"):
@@ -765,6 +824,13 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, 500)
                 return
             self.send_bytes(buf.getvalue(), "application/zip", f"{slugify(pid)}.face.zip")
+        elif path.startswith("/builtin-assets/"):
+            rel = urllib.parse.unquote(path[len("/builtin-assets/"):]).replace("\\", "/").lstrip("/")
+            resolved = _resolve_builtin_asset("builtin://" + rel)
+            if resolved:
+                self.send_file(resolved, _mime_for_path(resolved))
+                return
+            self.send_json({"ok": False, "error": "Not found."}, 404)
         elif path.startswith("/presets/"):
             rel = path[len("/presets/"):].strip("/")
             parts = rel.split("/")

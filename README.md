@@ -37,7 +37,7 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 - **Multi-Zone Animated GIF / WebP Dials (`01 2e`):**
   - Drop animated `.gif` or `.webp` files as full-screen backgrounds or stack up to **3 independent floating GIF zones** at any Z-order with live animated browser preview and automatic `1.3 MB` flash-budget optimization.
 - **60Hz Rotating Analog Hands (`01 0a`) — Procedural & Custom PNG Uploads:**
-  - 7 built-in hand packs (**Omnitrix**, **Stark Arc Reactor**, **Skeleton Dauphine**, **8-Bit Pixel**, **Classic Needles**, **Neon Pointers**, **Minimalist Baton**) **plus Custom PNG Hand & Center Cap Uploads** with adjustable lengths and pivot tail %.
+  - 8 built-in hand packs (**Omnitrix**, **Omnitrix Silver Glass**, **Stark Arc Reactor**, **Skeleton Dauphine**, **8-Bit Pixel**, **Classic Needles**, **Neon Pointers**, **Minimalist Baton**) **plus Custom PNG Hand & Center Cap Uploads** with adjustable lengths and pivot tail %.
 - **Custom PNG Stickers & Text Labels (`01 00`):**
   - Layer transparent PNG badges, logos, or HUD frames (with scale, rotation, opacity) and custom gradient/glow text labels anywhere in the Z-order stack.
 - **Full Native Watch 4S Widgets (Verified Byte-for-Byte Across Official LS26 Dials):**
@@ -50,8 +50,9 @@ Overcomes the default Haylou Fun companion app limitations—fixed clock placeme
 - **Zero-Java Pure-Python Haylou Fun APK Patcher (`scripts/patch_and_build_apk.py`):**
   - Modular CLI patches (`--noclock`, `--unlock-cards`, `--rhr`, `--vitality-vo2`, `--night-raise-to-wake`, `--cycling-fixes`, `--workout-analytics`, `--hrv-active`, `--hourly-charts`, `--voip-calls`, `--all`) with pure-Python 4-byte/4KB alignment and APK Signature Scheme v2 & v3 signing (`cryptography`) — **no Java, `keytool`, `zipalign`, or Android SDK Build-Tools required**.
   - Unlocks hidden Watch 4S health cards & firmware-verified BLE controls (PAI, VO2 Max, HRV, Active/Standing Hours, High/Low Heart Rate Alert `0x87 02`, and Daytime Sleep Naps `0xBC 01`), unlocks Watch 4S's native **30-minute hardware step histograms (`0x59`)** plus **Hourly Steps, Calories & Exercise Day Charts** across Daily Activities, Steps/Calories `D` tabs, and Home mini cards, adds a 3rd **Resting Heart Rate** card to Heart Rate Details, runs on-device **Vitality Score (PAI)**, **VO2 Max**, **Workout Analytics** (Aerobic & Anaerobic Training Effect `0.2–5.0`, Exercise Load / EPOC, Recovery Time, and Per-Workout VO2 Max in `SportDetailActivity`), **30-Minute Stress-Derived HRV**, and **Hourly Active / Standing Hours (12h)** engines, unlocks a **Night Raise-to-Wake Schedule** (**Device settings → DND mode**, wired exclusively to BLE `0x72` `sendQuickViewTime` so wrist-wake turns off at night, default `23:00–07:00`, while calls & notifications stay active), adds **Cycling Fixes** (strips handlebar-vibration phantom cycling steps using exact Watch 4S `0x59` 30-min hardware overlap—persisted across midnight in local-only `SportTable.sportcounter`—with a `30 steps/min` historical fallback and lossless self-healing while preserving bike distance/calories, computes true moving time & moving average speed on synced GPS rides while keeping `SportTable.points` intact for Strava's smooth velocity curve, and adds live GPS auto-pause/auto-resume for phone-started rides), and adds **VoIP Incoming Call Alerts + Wrist Reject** (WhatsApp, WhatsApp Business, Messenger, Instagram, Telegram, Viber, and Discord ring Watch 4S with the real caller name via BLE `0x41` and execute the VoIP app's Decline action when rejected from the wrist).
-- **Ben 10 Omnitrix Generator:**
+- **Ben 10 Omnitrix Generator & Built-In Alien Force Holograms Template:**
   - 4 built-in series faceplates (**Alien Force / UAF**, **Original Series**, **Omniverse**, **5 Years Later**) with 6 preset colorways + full custom hex color picker and glow control.
+  - Built-in **Alien Force · 5 Holograms** template (`studio/assets/alien_force_holograms/`): tap-to-switch (`01 1a`) through 5 neon-green Alien Force holograms (**Swampfire**, **Humungousaur**, **Big Chill**, **Jetray**, **Echo Echo**) + **Timeout Red** on Tap #6, with color-neutral **Omnitrix Silver Glass** orbital hands and automatic **`<50%` Battery Red Timeout** shift (`01 12`) in a compact `~632 KB` Watch 4S `.bin`.
 - **Safe & 100% Reversible:**
   - Installs strictly into the watch's official cloud dial slot (`CRPWatchFaceInfo.WacthFaceType.JIELI`). Never flashes firmware or bootloaders. Switching watchfaces on the watch restores stock dials immediately.
 
@@ -176,7 +177,8 @@ haylou-watch4s-watchface-maker/
 ├── LICENSE                          # MIT License
 ├── studio/
 │   ├── server.py                    # Local HTTP API & preset manager (Python stdlib)
-│   └── index.html                   # Visual multi-layer Watch 4S designer UI
+│   ├── index.html                   # Visual multi-layer Watch 4S designer UI
+│   └── assets/                      # Self-contained built-in template artwork
 ├── scripts/
 │   ├── watchface_compiler.py        # Unified multi-layer .bin compiler & preview engine
 │   ├── watchface_bin_maker.py       # Standalone digital / pure-image .bin CLI

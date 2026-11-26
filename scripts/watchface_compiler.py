@@ -52,7 +52,7 @@ from omnitrix_watchface_maker import (
 
 W, H = WATCH_W, WATCH_H
 CX, CY = W // 2, H // 2
-MAX_WATCH_BIN_BYTES = 1_300_000  # Official Watch 4S max cloud dial is ~1,289 KB
+MAX_WATCH_BIN_BYTES = 960_000  # Reliable Watch 4S BLE transfer & flash budget (~937.5 KB; 206/211 official dials <= 940 KB)
 
 PROGRESS_METRIC_SUB = {
     "steps": 0x00,
@@ -1722,17 +1722,30 @@ def build_battery_widget(batt_cfg):
 
     if style == "omnitrix_low_red":
         # Auto-shift full faceplate to Red Timeout Omnitrix when battery < threshold_pct (default 50%).
-        # Frames < threshold share one Red Omnitrix RLE blob; frames >= threshold share one transparent blob.
+        # Uses supplied `image_path` (e.g. transparent-bezel Red Timeout layer) when provided,
+        # otherwise draws a clean RLE-compact Alien Force Red Timeout Omnitrix faceplate.
         threshold_pct = max(10, min(90, int(batt_cfg.get("threshold_pct", 50))))
-        omni_style = batt_cfg.get("omni_style", "alien_force")
-        if omni_style not in ("alien_force", "os", "omniverse", "5yl"):
-            omni_style = "alien_force"
-        glow = float(batt_cfg.get("omni_glow", 1.0))
-        ticks = bool(batt_cfg.get("omni_ticks", True))
         brightness = float(batt_cfg.get("brightness", 90))
-        red_hex = batt_cfg.get("color", "#ff1818")
-        red_img = draw_omnitrix_bg(style=omni_style, palette=palette_from_hex(red_hex), show_ticks=ticks, glow_strength=glow)
-        red_img = apply_amoled_dimmer(red_img, brightness, 0)
+        img_path = batt_cfg.get("image_path")
+        red_img = None
+        if img_path and os.path.isfile(img_path):
+            try:
+                with Image.open(img_path) as im:
+                    red_img = _prepare_circular_pil(im.convert("RGBA"), W, circular=True)
+                    if brightness < 99.5:
+                        red_img = apply_amoled_dimmer(red_img, brightness, 0)
+            except Exception:
+                red_img = None
+        if red_img is None:
+            omni_style = batt_cfg.get("omni_style", "alien_force")
+            if omni_style not in ("alien_force", "os", "omniverse", "5yl"):
+                omni_style = "alien_force"
+            glow = float(batt_cfg.get("omni_glow", 1.0))
+            ticks = bool(batt_cfg.get("omni_ticks", True))
+            red_hex = batt_cfg.get("color", "#ff1818")
+            red_img = draw_omnitrix_bg(style=omni_style, palette=palette_from_hex(red_hex), show_ticks=ticks, glow_strength=glow)
+            red_img = apply_amoled_dimmer(red_img, brightness, 0)
+            red_img = _posterize_for_rle(_prepare_circular_pil(red_img, W, circular=True), bits=4)
         blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         for step in range(11):
             frames.append(red_img if (step * 10 < threshold_pct) else blank)
@@ -2289,16 +2302,12 @@ def _pack_watchface_binary(*, has_anim_header, digit_tables, layout_items, prev_
         img_start = max(0x98, img_start)
 
     out = bytearray(img_start)
-    blob_cache = {}
 
     def append_blob(blob):
-        cached = blob_cache.get(blob)
-        if cached is not None:
-            return cached
+        # Match 211/211 official LS26 dials: emit a unique 4-byte-aligned offset per sprite slot.
         off = len(out)
         out.extend(blob)
         pad4_ff(out)
-        blob_cache[blob] = off
         return off
 
     item_offs = []
@@ -2491,6 +2500,8 @@ def compile_config_to_bin(config, out_bin_path, save_preview_path=None):
         preview_full.save(save_preview_path)
     prev_img = preview_full.resize((PREV_W, PREV_H), Image.Resampling.LANCZOS)
     prev_blob = encode_image_rle_argb565(prev_img)
+    if len(prev_blob) > 65_000:
+        prev_blob = encode_image_rle_argb565(_posterize_for_rle(prev_img, bits=5))
 
     bg_cfg = config.get("background", {})
     anim_specs = normalize_anim_sprites(config)
@@ -2520,7 +2531,13 @@ def compile_config_to_bin(config, out_bin_path, save_preview_path=None):
         full_bg_anim = ("bg_anim" in anim_built and anim_built["bg_anim"][1][2] >= W and anim_built["bg_anim"][1][3] >= H)
         ts_op = float(config.get("tap_switch", {}).get("opacity", 100))
         ts_opaque = (ts_op >= 0.995 if 0.0 < ts_op <= 1.0 else ts_op >= 99.5)
-        full_ts = (has_ts and ts_frames[0].width >= W and ts_frames[0].height >= H and ts_opaque)
+        full_ts = (
+            has_ts
+            and ts_frames[0].width >= W
+            and ts_frames[0].height >= H
+            and ts_opaque
+            and bg_cfg.get("mode", "solid") == "solid"
+        )
 
         telem_cfg = config.get("telemetry", {})
         telem_assets = build_telemetry_assets(telem_cfg) if telem_cfg.get("enabled") else None
