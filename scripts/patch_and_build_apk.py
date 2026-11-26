@@ -22,9 +22,11 @@ Modular patch flags (default: --all):
                   notifications active at night.
   --cycling-fixes classes6.dex: Three cycling fixes for Watch 4S + Haylou Fun:
                   1) Strip phantom handlebar-vibration steps during cycling windows
-                     (live BLE sync + real-time delta guard + 30-day backfill + SportTable.steps=0)
-                  2) Post-sync GPS moving time, stationary GPS point filtering & avg speed cleanup
-                     for watch-started rides (before Haylou Cloud / Strava upload)
+                     (exact 0x59 30-min overlap when synced with --hourly-charts, 30 steps/min
+                     fallback on older days, self-healing signed delta, live BLE guard,
+                     and SportTable.steps=0)
+                  2) Post-sync GPS moving time & avg speed cleanup for watch-started rides
+                     while preserving intact GPS points for Strava's smooth velocity curve
                   3) Live GPS auto-pause & auto-resume for phone-started cycling
                      (auto-pauses phone + watch at < 3.6 km/h for 5s, auto-resumes >= 5.4 km/h)
   --voip-calls    classes6.dex: VoIP incoming call alerts + wrist reject for Watch 4S
@@ -1686,14 +1688,18 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     # Branch A: cleanStepTable(StepDataTable v15) -> 1 if modified else 0
     # Regs: v15=step, v18,v19=localMidMs, v17=sports, v16=listSize,
     #       v14=spIdx, v13=hasCycle, v12=curTotal, v11=totalSportSteps,
-    #       v10=totalCycleSec, v9=hourMask
+    #       v10=totalCycleSec, v9=hasExactZero
     # ------------------------------------------------------------------ #
     a.label("clean_step_table")
     a.check_cast(15, refs["T_STEP_TABLE"])
 
     a.invoke_virtual([15], refs["M_STEP_GET_TOTAL"])
     a.move_result(12)  # v12 = curTotal
-    a.if_lez(12, "ret_zero")
+    a.if_gtz(12, "cs_has_steps")
+    a.invoke_virtual([15], refs["M_STEP_GET_BASE"])
+    a.move_result(0)
+    a.if_lez(0, "ret_zero")
+    a.label("cs_has_steps")
 
     a.invoke_virtual([15], refs["M_STEP_GET_RECDATE"])
     a.move_result_object(0)
@@ -1725,7 +1731,7 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.const4(13, 0)   # hasCycle = 0
     a.const4(11, 0)   # totalSportSteps = 0
     a.const4(10, 0)   # totalCycleSec = 0
-    a.const4(9, 0)    # hourMask = 0
+    a.const4(9, 0)    # hasExactZero = 0 (1 if 0x59 measured 0 phantom steps, encoded as sportcounter < 0)
     a.const16(20, 0)  # totalCycleDistKm (float 0.0f)
     a.const16(21, 0)  # totalCycleCal (int kcal)
 
@@ -1765,60 +1771,23 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.if_gtz(0, "cs_have_st")
     a.invoke_virtual([8], refs["M_SPORT_GET_COUNTER"])
     a.move_result(0)
-    a.if_lez(0, "cs_add_dur")
+    a.if_gtz(0, "cs_have_st")
+    a.if_gez(0, "cs_add_dur")
+    a.const4(9, 1)   # sportcounter < 0 => exact 0x59 measured 0 phantom steps
+    a.goto16("cs_add_dur")
     a.label("cs_have_st")
     a.add_int_2addr(11, 0)
     a.label("cs_add_dur")
     a.invoke_virtual([8], refs["M_SPORT_GET_DUR"])
     a.move_result(0)
-    a.if_lez(0, "cs_mark_hrs")
+    a.if_lez(0, "cs_sp_next")
     a.add_int_2addr(10, 0)
-
-    # Mark cycling hours [hStart..hEnd] in 24-bit hourMask (v9) for hourly-bucket watches
-    a.label("cs_mark_hrs")
-    a.invoke_virtual([8], refs["M_SPORT_START"])
-    a.move_result_object(0)
-    a.if_eqz(0, "cs_sp_next")
-    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
-    a.move_result_wide(0)
-    a.move_wide(2, 18)
-    a.sub_long_2addr(0, 2)
-    a.const_wide32(4, 3600000)
-    a.div_long_2addr(0, 4)
-    a.long_to_int(6, 0)  # v6 = hStart
-    a.if_gez(6, "cs_hs_ok")
-    a.const4(6, 0)
-    a.label("cs_hs_ok")
-
-    a.invoke_virtual([8], refs["M_SPORT_END"])
-    a.move_result_object(0)
-    a.if_eqz(0, "cs_sp_next")
-    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
-    a.move_result_wide(0)
-    a.sub_long_2addr(0, 2)
-    a.div_long_2addr(0, 4)
-    a.long_to_int(7, 0)  # v7 = hEnd
-    a.const16(0, 23)
-    a.if_le(7, 0, "cs_he_ok")
-    a.move(7, 0)
-    a.label("cs_he_ok")
-
-    a.label("cs_mask_loop")
-    a.if_gt(6, 7, "cs_sp_next")
-    a.const4(0, 1)
-    # bit = 1 << h: use loop-free shift via add? No, shl-int/2addr (0xB8) or just add_int_2addr?
-    # Keep 24-bit mask simple: set bit via shl_int_lit8? We can just set v9 = -1 or use shl!
-    # Wait: even simpler, add shl-int/2addr (0xB8) or use inline 1-word shl_int_2addr!
-    a.items.append(("words", [0xB8 | ((0 | (6 << 4)) << 8)]))  # shl-int/2addr v0, v6
-    a.or_int_2addr(9, 0)
-    a.add_int_lit8(6, 6, 1)
-    a.goto16("cs_mask_loop")
 
     a.label("cs_sp_next")
     a.add_int_lit8(14, 14, 1)
     a.goto16("cs_sp_loop")
 
-    # Compute idempotent step deduction using StepDataTable.baseSteps
+    # Compute lossless, self-healing step deduction using StepDataTable.baseSteps
     a.label("cs_sp_done")
     a.if_eqz(13, "ret_zero")
 
@@ -1827,18 +1796,22 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.move(4, 12)
     a.add_int_2addr(4, 3)  # v4 = rawTotal = curTotal + alreadyBase
 
-    # want (v5) = totalSportSteps (v11) if > 0, else totalCycleSec (v10) * 3 / 2 (~90 steps/min)
+    # want (v5): exact totalSportSteps (0x59 hardware overlap / watch counter) if > 0;
+    # else 0 if 0x59 explicitly measured 0 phantom steps (hasExactZero != 0);
+    # else fallback totalCycleSec / 2 (~30 steps/min realistic handlebar vibration on historical days)
     a.move(5, 11)
     a.if_gtz(5, "cs_want_ok")
-    a.mul_int_lit8(5, 10, 3)
-    a.div_int_lit8(5, 5, 2)
+    a.if_nez(9, "cs_want_ok")
+    a.div_int_lit8(5, 10, 2)
     a.label("cs_want_ok")
     a.if_le(5, 4, "cs_wcap")
     a.move(5, 4)
     a.label("cs_wcap")
 
-    a.sub_int_2addr(5, 3)  # delta = want - alreadyBase
-    a.if_lez(5, "cs_chk_heal")
+    # Signed delta = want - alreadyBase (negative delta restores previously over-deducted steps/dist/kcal!)
+    a.sub_int_2addr(5, 3)
+    a.if_eqz(5, "cs_chk_heal")
+    a.if_lez(5, "cs_dcap")
     a.if_le(5, 12, "cs_dcap")
     a.move(5, 12)
     a.label("cs_dcap")
@@ -1850,8 +1823,8 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.invoke_virtual([15, 6], refs["M_STEP_SET_TOTAL"])
     a.invoke_virtual([15, 3], refs["M_STEP_SET_BASE"])
 
-    # Deduct ONLY walking-equivalent distance (0.00074 km/step) & kcal (0.04 kcal/step)
-    # of the removed phantom steps, floored at the day's cycling totals so bike km/kcal stay intact
+    # Adjust ONLY walking-equivalent distance (0.00074 km/step) & kcal (0.04 kcal/step)
+    # of delta (positive deducts, negative restores), floored at cycling totals so bike km/kcal stay intact
     a.int_to_float(3, 5)  # v3 = (float) delta
 
     a.const_float(4, 0.00074)
@@ -1878,34 +1851,7 @@ def _build_cycling_obj_helper_insns(d6: DexFile, refs: dict, pad_words: int) -> 
     a.move(2, 0)
     a.label("cs_kcal_ok")
     a.invoke_virtual([15, 2], refs["M_STEP_SET_KCAL"])
-
-    # Also deduct from hourly items[24] in cycling hours if items[24] is populated
-    a.invoke_virtual([15], refs["M_STEP_GET_ITEMS"])
-    a.move_result_object(8)
-    a.if_eqz(8, "ret_one")
-    a.array_length(0, 8)
-    a.const16(1, 24)
-    a.if_lt(0, 1, "ret_one")
-    a.const4(0, 0)  # h = 0; v5 = remaining delta
-    a.label("cs_it_loop")
-    a.if_ge(0, 1, "ret_one")
-    a.if_lez(5, "ret_one")
-    a.const4(2, 1)
-    a.items.append(("words", [0xB8 | ((2 | (0 << 4)) << 8)]))  # shl-int/2addr v2, v0
-    a.and_int_2addr(2, 9)
-    a.if_eqz(2, "cs_it_next")
-    a.aget(3, 8, 0)
-    a.if_lez(3, "cs_it_next")
-    a.move(4, 5)
-    a.if_le(4, 3, "cs_it_cap")
-    a.move(4, 3)
-    a.label("cs_it_cap")
-    a.sub_int_2addr(3, 4)
-    a.aput(3, 8, 0)
-    a.sub_int_2addr(5, 4)
-    a.label("cs_it_next")
-    a.add_int_lit8(0, 0, 1)
-    a.goto16("cs_it_loop")
+    a.goto16("ret_one")
 
     # Self-heal if an earlier proportional-scaling pass dropped totalDistance/totalKcal below cycling totals
     a.label("cs_chk_heal")
@@ -2142,9 +2088,10 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     CommonUtil.z BEFORE Haylou Cloud / Strava upload):
       1) Zeroes SportTable.steps on cycling workouts (stashing original watch-reported steps
          in local-only SportTable.sportcounter so daily StepDataTable cleanup stays exact).
-      2) Post-sync moving time, avg speed & stationary GPS point filtering on cycling
-         SportTables with GPS tracks (strips < 0.85 m/s / < 3.06 km/h stopped points and
-         deducts stopped time when >= 10s stopped; marks movingTime > 0).
+      2) Post-sync moving time & avg speed cleanup on cycling SportTables with GPS tracks
+         (deducts < 0.85 m/s / < 3.06 km/h stopped time when >= 10s stopped; marks movingTime > 0)
+         while preserving SportTable.points 100% intact so Strava computes smooth velocity curves
+         without flat-block gaps.
       3) Phantom cycling step cleanup on each cycling day's StepDataTable via ObjectHelper.hashCode.
     """
     a = DalvikAssembler()
@@ -2270,16 +2217,10 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.const4(1, 5)
     a.if_lt(12, 1, "bf_sp_next")
 
-    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx, v32 = cleanPoints)
+    # Scan consecutive GPS points (v8 = float[3], v9,v10 = stoppedMs, v30,v31 = movingMs, v11 = ptIdx)
+    # Keep SportTable.points 100% intact so Strava receives the unbroken GPS track for smooth speed curves.
     a.const4(0, 3)
     a.new_array(8, 0, refs["T_FLOAT_ARR"])
-    a.new_instance(0, refs["T_ARRAYLIST"])
-    a.invoke_direct([0, 12], refs["M_AL_INIT_CAP"])
-    a.move_object(32, 0)
-    a.const4(1, 0)
-    a.invoke_interface([13, 1], refs["M_LIST_GET"])
-    a.move_result_object(1)
-    a.invoke_virtual([0, 1], refs["M_AL_ADD"])  # always keep start point
     a.const_wide16(9, 0)
     a.const_wide16(30, 0)
     a.const4(11, 1)
@@ -2306,10 +2247,10 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.if_gtz(1, "bf_dt_pos")
     a.const_wide16(4, 2000)
     a.label("bf_dt_pos")
-    # GPS gaps > 30s (manual watch pauses / GPS dropouts): keep restart point, skip speed math
+    # GPS gaps > 30s (manual watch pauses / GPS dropouts): skip speed math
     a.const_wide32(2, 30000)
     a.cmp_long(1, 4, 2)
-    a.if_gtz(1, "bf_pt_gap_keep")
+    a.if_gtz(1, "bf_pt_next")
     a.move_wide(28, 4)  # save dtMs in v28,v29
 
     # Load lat2(v4,v5), lon2(v6,v7), lon1(v2,v3), lat1(v0,v1) for distanceBetween(v0..v8)
@@ -2331,20 +2272,11 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.mul_float_2addr(1, 4)      # v1 = 0.85 * dtSec
     a.cmpl_float(4, 0, 1)        # d < 0.85 * dtSec ?
     a.if_gez(4, "bf_pt_moving")
-    a.add_long_2addr(9, 2)       # stoppedMs += dtMs (drop stationary point from cleanPoints)
-    a.goto16("bf_pt_next")
-
-    a.label("bf_pt_gap_keep")
-    a.move_object(0, 32)
-    a.invoke_virtual([0, 6], refs["M_AL_ADD"])
+    a.add_long_2addr(9, 2)       # stoppedMs += dtMs
     a.goto16("bf_pt_next")
 
     a.label("bf_pt_moving")
     a.add_long(30, 30, 2)        # movingMs += dtMs
-    a.invoke_interface([13, 11], refs["M_LIST_GET"])
-    a.move_result_object(1)
-    a.move_object(0, 32)
-    a.invoke_virtual([0, 1], refs["M_AL_ADD"])
 
     a.label("bf_pt_next")
     a.add_int_lit8(11, 11, 1)
@@ -2359,19 +2291,6 @@ def _build_cycling_backfill_insns(d6: DexFile, refs: dict, pad_words: int) -> by
     a.move_wide(4, 30)
     a.div_long_2addr(4, 2)
     a.long_to_int(6, 4)          # v6 = movingSec
-
-    # Replace GPS track with stationary-filtered points when >= 10s stopped & >= 5 points kept
-    a.const16(3, 10)
-    a.if_lt(0, 3, "bf_pts_done")
-    a.move_object(4, 32)
-    a.invoke_virtual([4], refs["M_AL_SIZE"])
-    a.move_result(5)
-    a.const4(3, 5)
-    a.if_lt(5, 3, "bf_pts_done")
-    a.if_ge(5, 12, "bf_pts_done")
-    a.move_object(3, 14)
-    a.invoke_virtual([3, 4], refs["M_SPORT_SET_POINTS"])
-    a.label("bf_pts_done")
 
     a.move_object(1, 14)
     a.invoke_virtual([1], refs["M_SPORT_GET_DUR"])
@@ -2737,7 +2656,6 @@ def patch_classes6_cycling_fixes(dex_bytes: bytes) -> bytes:
     pre = DalvikAssembler()
     pre.const4(0, 0)
     pre.invoke_virtual([4, 0], refs["M_STEP_SET_BASE"])
-    pre.invoke_virtual([4, 0], refs["M_STEP_SET_SPORT_STEPS"])
     pre.invoke_static([4], refs["M_OBJ_HASH"])
     pre_bytes = pre.assemble()
 
@@ -4738,17 +4656,20 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.move_result_object(20)
     a.if_eqz(20, "hc_day_next")
 
-    # Allocate float[24] stArr (v19), wKcal (v18), cycMin (v17), int[24] stepArr (v16), float[24] kcalArr (v15)
+    # Allocate float[24] stArr (v19), wKcal (v18), int[24] stepArr (v16), float[24] kcalArr (v15),
+    # and int[76] cycMeta (v17): [0..47]=cycling sec/30m slot, [48]=cycCount, [49]=maxCycEndSec/isFresh0x59,
+    # [50]=exactPhantom, [51]=dirtyFlag, [52..75]=hourPhantom[0..23]
     a.const16(1, 24)
     a.new_array(0, 1, refs["T_FLOAT_ARR"])
     a.move_object(19, 0)
     a.new_array(0, 1, refs["T_FLOAT_ARR"])
     a.move_object(18, 0)
-    a.new_array(0, 1, refs["T_FLOAT_ARR"])
-    a.move_object(17, 0)
     a.new_array(0, 1, refs["T_INT_ARR"])
     a.move_object(16, 0)
     a.new_array(15, 1, refs["T_FLOAT_ARR"])
+    a.const16(1, 76)
+    a.new_array(0, 1, refs["T_INT_ARR"])
+    a.move_object(17, 0)
 
     # Fetch HeartRateDataTable (v14) & dayRhr (v13, default 62, clamped 45..85)
     a.const16(13, 62)
@@ -4848,7 +4769,7 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.div_int_lit16(3, 6, 3600)  # v3 = h
     a.label("hc_ov_loop")
     a.const16(0, 24)
-    a.if_ge(3, 0, "hc_sp_next")
+    a.if_ge(3, 0, "hc_cyc_slots")
     a.mul_int_lit16(0, 3, 3600)  # hStart
     a.const16(1, 3600)
     a.move(2, 0)
@@ -4860,7 +4781,7 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.move(2, 7)                 # ovEnd = min(endSec, hEnd)
     a.label("hc_ov_e")
     a.sub_int_2addr(2, 0)        # ovSec = ovEnd - ovStart
-    a.if_lez(2, "hc_sp_next")
+    a.if_lez(2, "hc_cyc_slots")
 
     # ovMin (v0, float) = ovSec / 60.0f
     a.int_to_float(0, 2)
@@ -4869,12 +4790,7 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.aget(1, 19, 3)             # stArr[h] += ovMin
     a.add_float_2addr(1, 0)
     a.aput(1, 19, 3)
-    a.if_eqz(4, "hc_ov_kcal")
-    a.aget(1, 17, 3)             # cycMin[h] += ovMin
-    a.add_float_2addr(1, 0)
-    a.aput(1, 17, 3)
 
-    a.label("hc_ov_kcal")
     a.const4(0, 0)
     a.cmpl_float(0, 5, 0)
     a.if_lez(0, "hc_ov_next")
@@ -4889,6 +4805,68 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.label("hc_ov_next")
     a.add_int_lit8(3, 3, 1)
     a.goto16("hc_ov_loop")
+
+    # For cycling workouts, record exact 30-min slot overlaps (cycMeta[0..47]), cycCount ([48]), & maxCycEndSec ([49])
+    a.label("hc_cyc_slots")
+    a.if_eqz(4, "hc_sp_next")
+    a.const16(0, 48)
+    a.aget(1, 17, 0)
+    a.add_int_lit8(1, 1, 1)
+    a.aput(1, 17, 0)
+
+    # Use wall-clock endTime if within durSec + 900s (covers brief traffic-light stops, excludes long cafe breaks)
+    a.invoke_virtual([9], refs["M_SPORT_END"])
+    a.move_result_object(0)
+    a.if_eqz(0, "hc_cs_max")
+    a.invoke_virtual([0], refs["M_DATE_GET_TIME"])
+    a.move_result_wide(0)
+    a.move_wide(2, 21)
+    a.sub_long_2addr(0, 2)
+    a.const_wide16(2, 1000)
+    a.div_long_2addr(0, 2)
+    a.long_to_int(0, 0)          # v0 = endTimeSec
+    a.if_le(0, 7, "hc_cs_max")
+    a.const16(1, 900)
+    a.move(2, 7)
+    a.add_int_2addr(2, 1)
+    a.if_gt(0, 2, "hc_cs_max")
+    a.const32(1, 86400)
+    a.if_le(0, 1, "hc_cs_cl")
+    a.move(0, 1)
+    a.label("hc_cs_cl")
+    a.move(7, 0)
+
+    a.label("hc_cs_max")
+    a.const16(0, 49)
+    a.aget(1, 17, 0)
+    a.if_le(7, 1, "hc_cs_go")
+    a.aput(7, 17, 0)
+
+    a.label("hc_cs_go")
+    a.div_int_lit16(3, 6, 1800)  # s = startSec / 1800 (0..47)
+    a.label("hc_cs_loop")
+    a.const16(0, 48)
+    a.if_ge(3, 0, "hc_sp_next")
+    a.mul_int_lit16(0, 3, 1800)  # sStart
+    a.const16(1, 1800)
+    a.move(2, 0)
+    a.add_int_2addr(2, 1)        # sEnd = sStart + 1800
+    a.if_ge(0, 6, "hc_cs_s")
+    a.move(0, 6)                 # ovStart = max(startSec, sStart)
+    a.label("hc_cs_s")
+    a.if_le(2, 7, "hc_cs_e")
+    a.move(2, 7)                 # ovEnd = min(cycEndSec, sEnd)
+    a.label("hc_cs_e")
+    a.sub_int_2addr(2, 0)        # ovSec = ovEnd - ovStart
+    a.if_lez(2, "hc_sp_next")
+    a.aget(0, 17, 3)
+    a.add_int_2addr(0, 2)
+    a.if_le(0, 1, "hc_cs_put")
+    a.move(0, 1)
+    a.label("hc_cs_put")
+    a.aput(0, 17, 3)
+    a.add_int_lit8(3, 3, 1)
+    a.goto16("hc_cs_loop")
 
     a.label("hc_sp_next")
     a.add_int_lit8(10, 10, 1)
@@ -4950,7 +4928,11 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.move_object(0, 20)
     a.invoke_virtual([0], refs["M_STEP_GET_TOTAL"])
     a.move_result(12)  # v12 = totalSteps
-    a.if_lez(12, "hc_kcal_start")
+    a.if_gtz(12, "hc_st_go")
+    a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
+    a.move_result(1)
+    a.if_lez(1, "hc_kcal_start")
+    a.label("hc_st_go")
 
     # Case A (dayOffset == 0): ingest Watch 4S BLE 0x59 48 half-hour hardware steps from SharedPreferences("CRPSDK")
     a.move(0, 25)
@@ -4975,6 +4957,21 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.add_long_2addr(2, 4)
     a.cmp_long(4, 0, 2)
     a.if_gez(4, "hc_steps_keep_or_hr")
+
+    # Record whether 0x59 snapshot is fresh enough to cover today's latest cycling ride (spTimeSec + 120 >= maxCycEndSec)
+    a.move_wide(2, 21)
+    a.sub_long_2addr(0, 2)
+    a.const_wide16(2, 1000)
+    a.div_long_2addr(0, 2)
+    a.long_to_int(0, 0)
+    a.add_int_lit8(0, 0, 120)
+    a.const16(1, 49)
+    a.aget(2, 17, 1)
+    a.const4(3, 0)
+    a.if_lt(0, 2, "hc_sp_fresh")
+    a.const4(3, 1)
+    a.label("hc_sp_fresh")
+    a.aput(3, 17, 1)
 
     a.const_string(1, refs["STR_STEPS"])
     a.const_string(2, refs["STR_EMPTY"])
@@ -5028,6 +5025,25 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.add_int_2addr(4, 5)
     a.aput(4, 16, 3)
     a.add_int_2addr(6, 5)
+    a.if_lez(5, "hc_p_snext")
+    a.aget(1, 17, 7)         # v1 = cycSlotSec[slot] (0..1800)
+    a.if_lez(1, "hc_p_snext")
+    # Exact 30-min overlap phantom steps: phantom = (rawSlotSteps * cycSlotSec + 900) / 1800
+    a.move(2, 5)
+    a.mul_int_2addr(2, 1)
+    a.const16(1, 900)
+    a.add_int_2addr(2, 1)
+    a.div_int_lit16(2, 2, 1800)
+    a.if_lez(2, "hc_p_snext")
+    a.const16(1, 50)
+    a.aget(0, 17, 1)
+    a.add_int_2addr(0, 2)
+    a.aput(0, 17, 1)         # cycMeta[50] += phantom (exactPhantom)
+    a.add_int_lit8(1, 3, 52)
+    a.aget(0, 17, 1)
+    a.add_int_2addr(0, 2)
+    a.aput(0, 17, 1)         # cycMeta[52 + h] += phantom (hourPhantom[h])
+    a.label("hc_p_snext")
     a.add_int_lit8(7, 7, 1)
     a.goto16("hc_p_skip")
 
@@ -5038,76 +5054,105 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.label("hc_p_done")
     a.if_lez(6, "hc_steps_keep_or_hr")
 
-    # Deduct stripped cycling phantom steps (baseSteps) from cycling hours cycMin[h] (2-pass so
-    # overflow from one cycling hour is absorbed by adjacent cycling hours, keeping walking hours intact)
+    # If today has cycling workouts & fresh 0x59 data, persist exact 0x59 phantom steps into
+    # local-only SportTable.sportcounter (survives midnight & bulk syncs!) and invoke cleanStepTable
+    a.const16(0, 48)
+    a.aget(1, 17, 0)         # cycCount
+    a.if_lez(1, "hc_reconcile")
+    a.const16(0, 49)
+    a.aget(1, 17, 0)         # isFresh0x59
+    a.if_eqz(1, "hc_ded_chk")
+
+    a.const16(0, 50)
+    a.aget(8, 17, 0)         # v8 = exactPhantom
+    a.if_gtz(8, "hc_sc_val_ok")
+    a.const4(8, -1)          # -1 encodes measured 0 phantom steps
+    a.label("hc_sc_val_ok")
+
+    a.move_object(0, 29)
+    a.move_wide(1, 21)
+    a.const_wide32(3, 86400000)
+    a.add_long_2addr(3, 1)
+    a.invoke_interface([0, 1, 2, 3, 4], refs["M_SPORT_BY_DATE"])
+    a.move_result_object(10)
+    a.if_eqz(10, "hc_run_clean")
+    a.invoke_interface([10], refs["M_LIST_SIZE"])
+    a.move_result(9)
+    a.const4(7, 0)           # idx = 0
+    a.const4(6, 0)           # assigned = 0
+    a.label("hc_sc_loop")
+    a.if_ge(7, 9, "hc_run_clean")
+    a.invoke_interface([10, 7], refs["M_LIST_GET"])
+    a.move_result_object(5)
+    a.if_eqz(5, "hc_sc_next")
+    a.check_cast(5, refs["T_SPORT_TABLE"])
+    a.invoke_virtual([5], refs["M_SPORT_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "hc_sc_next")
+    a.invoke_virtual([5], refs["M_SPORT_GET_STEPS"])
+    a.move_result(0)
+    a.if_gtz(0, "hc_sc_next")
+    a.move(4, 8)
+    a.if_eqz(6, "hc_sc_first")
+    a.const4(4, 0)
+    a.label("hc_sc_first")
+    a.const4(6, 1)
+    a.invoke_virtual([5], refs["M_SPORT_GET_COUNTER"])
+    a.move_result(0)
+    a.if_eq(0, 4, "hc_sc_next")
+    a.invoke_virtual([5, 4], refs["M_SPORT_SET_COUNTER"])
+    a.move_object(0, 29)
+    a.invoke_interface([0, 5], refs["M_SPORT_UPDATE"])
+    a.label("hc_sc_next")
+    a.add_int_lit8(7, 7, 1)
+    a.goto16("hc_sc_loop")
+
+    # Run cleanStepTable (harmless no-op if --cycling-fixes is not applied)
+    a.label("hc_run_clean")
     a.move_object(0, 20)
     a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
-    a.move_result(5)  # v5 = baseSteps
-    a.if_lez(5, "hc_reconcile")
-    a.move(7, 5)      # v7 = baseSteps (int)
-    a.const4(6, 0)    # cycTotal (float)
-    a.const4(0, 0)
-    a.label("hc_ct_l")
-    a.const16(1, 24)
-    a.if_ge(0, 1, "hc_ct_d")
-    a.aget(1, 17, 0)
-    a.add_float_2addr(6, 1)
-    a.add_int_lit8(0, 0, 1)
-    a.goto16("hc_ct_l")
-    a.label("hc_ct_d")
-    a.const4(1, 0)
-    a.cmpl_float(1, 6, 1)
-    a.if_lez(1, "hc_reconcile")
-    a.int_to_float(5, 7)  # v5 = (float)baseSteps
-    a.const4(4, 0)        # v4 = dedSum (int)
-    a.const4(0, 0)
-    a.label("hc_cded_l")
-    a.const16(1, 24)
-    a.if_ge(0, 1, "hc_cded2_start")
-    a.aget(1, 17, 0)
-    a.const4(2, 0)
-    a.cmpl_float(2, 1, 2)
-    a.if_lez(2, "hc_cded_n")
-    a.mul_float_2addr(1, 5)
-    a.div_float_2addr(1, 6)
-    a.const_float(2, 0.5)
-    a.add_float_2addr(1, 2)
-    a.float_to_int(1, 1)
-    a.aget(2, 16, 0)
-    a.if_le(1, 2, "hc_cded_ok")
-    a.move(1, 2)
-    a.label("hc_cded_ok")
-    a.sub_int_2addr(2, 1)
-    a.aput(2, 16, 0)
-    a.add_int_2addr(4, 1)
-    a.label("hc_cded_n")
-    a.add_int_lit8(0, 0, 1)
-    a.goto16("hc_cded_l")
+    a.move_result(4)         # oldBase
+    a.move(3, 12)            # oldTotal
+    a.invoke_static([0], refs["M_OBJ_HASH"])
+    a.invoke_virtual([0], refs["M_STEP_GET_TOTAL"])
+    a.move_result(12)        # newTotal
+    a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
+    a.move_result(5)         # newBase
+    a.if_ne(5, 4, "hc_mark_dirty")
+    a.if_eq(12, 3, "hc_ded_chk")
+    a.label("hc_mark_dirty")
+    a.const16(0, 51)
+    a.const4(1, 1)
+    a.aput(1, 17, 0)         # cycMeta[51] = dirty = 1
 
-    a.label("hc_cded2_start")
-    a.sub_int_2addr(7, 4)  # v7 = remaining phantom steps un-deducted
-    a.if_lez(7, "hc_reconcile")
+    # Deduct exact per-hour 0x59 phantom steps from stepArr[0..23] only if cycling-fixes stripped baseSteps > 0
+    a.label("hc_ded_chk")
+    a.move_object(0, 20)
+    a.invoke_virtual([0], refs["M_STEP_GET_BASE"])
+    a.move_result(5)
+    a.if_lez(5, "hc_reconcile")
     a.const4(0, 0)
-    a.label("hc_cded2_l")
+    a.label("hc_hded_l")
     a.const16(1, 24)
-    a.if_ge(0, 1, "hc_reconcile")
-    a.if_lez(7, "hc_reconcile")
-    a.aget(1, 17, 0)
-    a.const4(2, 0)
-    a.cmpl_float(2, 1, 2)
-    a.if_lez(2, "hc_cded2_n")
-    a.aget(2, 16, 0)
-    a.if_lez(2, "hc_cded2_n")
-    a.move(1, 7)
-    a.if_le(1, 2, "hc_cded2_ok")
-    a.move(1, 2)
-    a.label("hc_cded2_ok")
-    a.sub_int_2addr(2, 1)
-    a.aput(2, 16, 0)
-    a.sub_int_2addr(7, 1)
-    a.label("hc_cded2_n")
+    a.if_ge(0, 1, "hc_hded_done")
+    a.add_int_lit8(2, 0, 52)
+    a.aget(3, 17, 2)
+    a.if_lez(3, "hc_hded_n")
+    a.aget(4, 16, 0)
+    a.sub_int_2addr(4, 3)
+    a.if_gez(4, "hc_hded_pos")
+    a.const4(4, 0)
+    a.label("hc_hded_pos")
+    a.aput(4, 16, 0)
+    a.label("hc_hded_n")
     a.add_int_lit8(0, 0, 1)
-    a.goto16("hc_cded2_l")
+    a.goto16("hc_hded_l")
+    a.label("hc_hded_done")
+    a.if_lez(12, "hc_kcal_start")
 
     # Reconcile stepArr[0..23] to match totalSteps (v12) exactly
     a.label("hc_reconcile")
@@ -5228,10 +5273,12 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
     a.goto16("hc_hrw_k")
     a.label("hc_hrw_kd")
     # Down-weight cycling hours so phantom cycling HR doesn't absorb walking steps
-    a.aget(4, 17, 5)
-    a.const4(0, 0)
-    a.cmpl_float(0, 4, 0)
-    a.if_lez(0, "hc_hrw_put")
+    a.mul_int_lit8(0, 5, 2)
+    a.aget(4, 17, 0)
+    a.add_int_lit8(0, 0, 1)
+    a.aget(0, 17, 0)
+    a.add_int_2addr(4, 0)
+    a.if_lez(4, "hc_hrw_put")
     a.if_lez(3, "hc_hrw_put")
     a.div_int_lit8(3, 3, 6)
     a.label("hc_hrw_put")
@@ -5320,7 +5367,8 @@ def _build_hourly_charts_insns(refs: dict, pad_words: int) -> bytes:
 
     # ---- Part 4: Idempotent change check & StepDataDao.insert(stepRow) ----
     a.label("hc_save_check")
-    a.const4(11, 0)  # dirty = 0
+    a.const16(0, 51)
+    a.aget(11, 17, 0)  # dirty = cycMeta[51] (1 if cleanStepTable updated stepRow)
 
     # Check stepArr (v16) non-empty & changed
     a.const4(6, 0)
@@ -5494,10 +5542,16 @@ def patch_classes6_hourly_charts(dex_bytes: bytes) -> bytes:
         "M_STEP_GET_STIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->getSportTimeItems()[F"),
         "M_STEP_SET_STIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/StepDataTable;->setSportTimeItems([F)V"),
         "M_SPORT_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/SportDao;->getSportDataByDate(JJ)Ljava/util/List;"),
+        "M_SPORT_UPDATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/SportDao;->update(Lcom/liesheng/lib_room/table/SportTable;)V"),
         "M_SPORT_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDuration()I"),
         "M_SPORT_GET_START": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getStartTime()Ljava/util/Date;"),
+        "M_SPORT_END": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getEndTime()Ljava/util/Date;"),
         "M_SPORT_GET_CAL": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getCal()I"),
         "M_SPORT_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getType()I"),
+        "M_SPORT_GET_STEPS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSteps()I"),
+        "M_SPORT_GET_COUNTER": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSportcounter()I"),
+        "M_SPORT_SET_COUNTER": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setSportcounter(I)V"),
+        "M_OBJ_HASH": d6.find_idx("method", "Lio/reactivex/internal/functions/ObjectHelper;->hashCode(Ljava/lang/Object;)I"),
         "F_STM_INST": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->INSTANCE:Lcom/liesheng/hayloufun/sport/data/SportTypeManager;"),
         "M_STM_MAIN_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->getMainTypeByType(I)I"),
         "M_HR_BY_DATE": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/HeartRateDataDao;->getHeartDataByDate(J)Lcom/liesheng/lib_room/table/HeartRateDataTable;"),
@@ -5607,10 +5661,8 @@ def patch_classes6_hourly_charts(dex_bytes: bytes) -> bytes:
     ph.move_result_object(0)
     ph.if_eqz(0, "ph_k")
     ph.array_length(1, 0)
-    ph.const16(0, 24)
-    ph.if_ne(1, 0, "ph_k")
-    ph.invoke_virtual([2], refs["M_STEP_GET_ITEMS"])
-    ph.move_result_object(0)
+    ph.add_int_lit8(1, 1, -24)
+    ph.if_nez(1, "ph_k")
     ph.invoke_virtual([4, 0], refs["M_STEP_SET_ITEMS"])
     # Preserve kcalItems[24]
     ph.label("ph_k")
@@ -5618,10 +5670,8 @@ def patch_classes6_hourly_charts(dex_bytes: bytes) -> bytes:
     ph.move_result_object(0)
     ph.if_eqz(0, "ph_st")
     ph.array_length(1, 0)
-    ph.const16(0, 24)
-    ph.if_ne(1, 0, "ph_st")
-    ph.invoke_virtual([2], refs["M_STEP_GET_KITEMS"])
-    ph.move_result_object(0)
+    ph.add_int_lit8(1, 1, -24)
+    ph.if_nez(1, "ph_st")
     ph.invoke_virtual([4, 0], refs["M_STEP_SET_KITEMS"])
     # Preserve sportTimeItems[24]
     ph.label("ph_st")
@@ -5629,10 +5679,8 @@ def patch_classes6_hourly_charts(dex_bytes: bytes) -> bytes:
     ph.move_result_object(0)
     ph.if_eqz(0, "ph_done")
     ph.array_length(1, 0)
-    ph.const16(0, 24)
-    ph.if_ne(1, 0, "ph_done")
-    ph.invoke_virtual([2], refs["M_STEP_GET_STIME"])
-    ph.move_result_object(0)
+    ph.add_int_lit8(1, 1, -24)
+    ph.if_nez(1, "ph_done")
     ph.invoke_virtual([4, 0], refs["M_STEP_SET_STIME"])
     ph.label("ph_done")
     ph_bytes = ph.assemble()
