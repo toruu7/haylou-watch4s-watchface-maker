@@ -1157,6 +1157,7 @@
               <label>Style</label>
               <select id="handStyle" onchange="syncHandsUI(); schedulePreview();">
                 <option value="omnitrix">Omnitrix (Alien Force)</option>
+                <option value="omnitrix_glass">Omnitrix Silver Glass</option>
                 <option value="stark_hud">Stark Arc Reactor (Laser Reticle)</option>
                 <option value="dauphine">Skeleton Tourbillon (Dauphine)</option>
                 <option value="pixel">8-Bit Pixel Weapons</option>
@@ -1354,6 +1355,7 @@
                 <option value="right_arc">Right Curved Arc (01 12)</option>
                 <option value="bar">Horizontal Bar (01 12)</option>
                 <option value="icon">Battery Pill Icon (01 12)</option>
+                <option value="omnitrix_low_red">Omnitrix &lt;50% Red Timeout (01 12)</option>
                 <option value="native_bar">Native Dynamic Battery Fill Bar (01 05)</option>
               </select>
             </div>
@@ -1901,11 +1903,12 @@
 
     function syncGaugeFieldVisibility(style) {
       const isNative = style === "native_bar";
+      const isOmniLow = style === "omnitrix_low_red";
       const isRingOrArc = ["ring", "inner_ring", "arc", "top_arc", "left_arc", "right_arc"].includes(style);
       const isPos = ["bar", "icon", "native_bar"].includes(style);
-      document.getElementById("gMetricRow").style.display = isNative ? "none" : "flex";
+      document.getElementById("gMetricRow").style.display = (isNative || isOmniLow) ? "none" : "flex";
       document.getElementById("gBorderColRow").style.display = isNative ? "flex" : "none";
-      document.getElementById("gThickRow").style.display = isNative ? "none" : "flex";
+      document.getElementById("gThickRow").style.display = (isNative || isOmniLow) ? "none" : "flex";
       document.getElementById("gInsetRow").style.display = isRingOrArc ? "flex" : "none";
       document.getElementById("gDimRow").style.display = (isNative || style === "bar") ? "flex" : "none";
       document.getElementById("gPosBox").style.display = isPos ? "flex" : "none";
@@ -1918,6 +1921,7 @@
       g.style = style;
       g.kind = (style === "native_bar") ? "native_battery_bar" : "progress";
       if (style === "native_bar") { g.metric = "battery"; if (!g.width || g.width > 120) g.width = 56; g.height = g.height || 24; }
+      if (style === "omnitrix_low_red") { g.metric = "battery"; g.color = "#ff1818"; g.threshold_pct = 50; g.brightness = 90; }
       bindGaugeInspector(g.id);
       renderLayerList();
       syncDragChips();

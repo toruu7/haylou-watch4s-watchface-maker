@@ -1547,6 +1547,40 @@ def build_analog_hands(hand_cfg):
     elif style == "omnitrix":
         pal = palette_from_hex(prim_hex, accent_hex)
         hands = draw_omnitrix_hands(pal)
+    elif style == "omnitrix_glass":
+        # Brushed silver-chrome & translucent frosted-glass Omnitrix orbital markers
+        # (leaves central hologram unobstructed and stays color-neutral on green & red themes)
+        hands = []
+        # Hour: machined silver ring + frosted glass core at r ~ 158px
+        hw, hh = 34, 178
+        hi = Image.new("RGBA", (hw * 2, hh * 2), (0, 0, 0, 0))
+        hd = ImageDraw.Draw(hi)
+        cx2 = hw
+        hd.ellipse((cx2 - 26, 10, cx2 + 26, 62), fill=(12, 16, 20, 235))
+        hd.ellipse((cx2 - 22, 14, cx2 + 22, 58), fill=(214, 226, 238, 245), outline=(255, 255, 255, 255), width=2)
+        hd.ellipse((cx2 - 14, 22, cx2 + 14, 50), fill=(165, 185, 205, 130), outline=(42, 52, 64, 220), width=2)
+        hd.arc((cx2 - 20, 16, cx2 + 20, 56), start=200, end=330, fill=(255, 255, 255, 235), width=3)
+        hands.append((0, CX - hw // 2, CY - hh, hi.resize((hw, hh), Image.Resampling.LANCZOS)))
+
+        # Minute: sleek metallic silver capsule with frosted glass inner slit at r ~ 184px
+        mw, mh = 24, 206
+        mi = Image.new("RGBA", (mw * 2, mh * 2), (0, 0, 0, 0))
+        md = ImageDraw.Draw(mi)
+        mx2 = mw
+        md.rounded_rectangle((mx2 - 15, 6, mx2 + 15, 90), radius=12, fill=(12, 16, 20, 235))
+        md.rounded_rectangle((mx2 - 11, 10, mx2 + 11, 86), radius=9, fill=(224, 234, 244, 245), outline=(255, 255, 255, 255), width=2)
+        md.rounded_rectangle((mx2 - 5, 18, mx2 + 5, 76), radius=4, fill=(180, 200, 220, 125), outline=(58, 70, 82, 200), width=1)
+        hands.append((1, CX - mw // 2, CY - mh, mi.resize((mw, mh), Image.Resampling.LANCZOS)))
+
+        # Second: crisp diamond chrome pip along outer bezel track at r ~ 213px
+        sw, sh = 18, 222
+        si = Image.new("RGBA", (sw * 2, sh * 2), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(si)
+        sx2 = sw
+        sd.polygon([(sx2, 4), (sx2 + 12, 20), (sx2, 36), (sx2 - 12, 20)], fill=(12, 16, 20, 235))
+        sd.polygon([(sx2, 8), (sx2 + 8, 20), (sx2, 32), (sx2 - 8, 20)], fill=(242, 248, 255, 250))
+        sd.polygon([(sx2, 13), (sx2 + 4, 20), (sx2, 27), (sx2 - 4, 20)], fill=(190, 215, 235, 150))
+        hands.append((2, CX - sw // 2, CY - sh, si.resize((sw, sh), Image.Resampling.LANCZOS)))
     elif style == "stark_hud":
         hands = []
         # Glowing cyan/accent HUD laser reticle pointers
@@ -1685,6 +1719,24 @@ def build_battery_widget(batt_cfg):
     if style == "inner_ring":
         inset = max(16, int(batt_cfg.get("radius_inset", batt_cfg.get("inset", 20))))
     frames = []
+
+    if style == "omnitrix_low_red":
+        # Auto-shift full faceplate to Red Timeout Omnitrix when battery < threshold_pct (default 50%).
+        # Frames < threshold share one Red Omnitrix RLE blob; frames >= threshold share one transparent blob.
+        threshold_pct = max(10, min(90, int(batt_cfg.get("threshold_pct", 50))))
+        omni_style = batt_cfg.get("omni_style", "alien_force")
+        if omni_style not in ("alien_force", "os", "omniverse", "5yl"):
+            omni_style = "alien_force"
+        glow = float(batt_cfg.get("omni_glow", 1.0))
+        ticks = bool(batt_cfg.get("omni_ticks", True))
+        brightness = float(batt_cfg.get("brightness", 90))
+        red_hex = batt_cfg.get("color", "#ff1818")
+        red_img = draw_omnitrix_bg(style=omni_style, palette=palette_from_hex(red_hex), show_ticks=ticks, glow_strength=glow)
+        red_img = apply_amoled_dimmer(red_img, brightness, 0)
+        blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        for step in range(11):
+            frames.append(red_img if (step * 10 < threshold_pct) else blank)
+        return 0, 0, frames
 
     if style in ("ring", "inner_ring"):
         bbox = (inset, inset, W - 1 - inset, H - 1 - inset)
@@ -1950,7 +2002,8 @@ def _render_scene(config, anim_frame_idx=0, sec_val=35, blink_on=True, prebuilt_
             comp.paste(sp, (nb["x"], nb["y"]), sp)
         else:
             bx, by, bframes = build_battery_widget(g)
-            comp.paste(bframes[8], (bx, by), bframes[8])
+            preview_idx = 2 if (g.get("style") == "omnitrix_low_red" and g.get("preview_low")) else 8
+            comp.paste(bframes[preview_idx], (bx, by), bframes[preview_idx])
 
     def draw_overlay(o):
         ov = build_overlay_sprite(o)
@@ -2236,11 +2289,16 @@ def _pack_watchface_binary(*, has_anim_header, digit_tables, layout_items, prev_
         img_start = max(0x98, img_start)
 
     out = bytearray(img_start)
+    blob_cache = {}
 
     def append_blob(blob):
+        cached = blob_cache.get(blob)
+        if cached is not None:
+            return cached
         off = len(out)
         out.extend(blob)
         pad4_ff(out)
+        blob_cache[blob] = off
         return off
 
     item_offs = []
