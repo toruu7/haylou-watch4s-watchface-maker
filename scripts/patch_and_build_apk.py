@@ -474,7 +474,7 @@ def patch_classes6_sideload(dex_bytes: bytes, mode: str = "sideload") -> bytes:
         0x6E, 0x10, 0xC6, 0xEA, 0x09, 0x00,  # 0059: invoke-virtual {v9}, File.length()J
         0x0B, 0x09,                          # 005c: move-result-wide v9 (v9:v10)
         0x84, 0x93,                          # 005d: long-to-int v3, v9
-        0x3B, 0x03, 0x05, 0x00,              # 005e: if-lez v3, -> 0063 (fallback if missing/empty)
+        0x3D, 0x03, 0x05, 0x00,              # 005e: if-lez v3, -> 0063 (fallback if missing/empty)
         0xD0, 0x33, 0x00, 0x10,              # 0060: add-int/lit16 v3, v3, 4096 (4KB flash sector margin)
         0x28, 0x02,                          # 0062: goto -> 0064
         0x21, 0xF3,                          # 0063: array-length v3, v15 (fallback to cloud dial size)
