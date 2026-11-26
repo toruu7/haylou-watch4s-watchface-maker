@@ -472,7 +472,7 @@ def build_tap_switch_assets(ts_cfg, posterize_bits=None):
     circular = bool(ts_cfg.get("circular", True))
     brightness = float(ts_cfg.get("brightness", 100))
     opacity = float(ts_cfg.get("opacity", 100))
-    count_cap = max(2, min(6, int(ts_cfg.get("count", 6))))
+    count_cap = max(2, min(8, int(ts_cfg.get("count", 8))))
     vignette = float(ts_cfg.get("vignette", 0)) if size >= W else 0.0
     cx = int(ts_cfg.get("x", CX))
     cy = int(ts_cfg.get("y", CY))
@@ -1749,6 +1749,24 @@ def build_battery_widget(batt_cfg):
         blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         for step in range(11):
             frames.append(red_img if (step * 10 < threshold_pct) else blank)
+        return 0, 0, frames
+
+    if style == "ring_mask":
+        # Adaptive color-matching 360° battery/progress ring via inverse masking:
+        # leaves the filled arc transparent (revealing green/red/custom ring art beneath)
+        # and covers the unfilled portion in a crisp opaque dark track color.
+        track_rgb = _safe_hex_rgb(batt_cfg.get("color", "#161a1e"), (22, 26, 30))
+        bbox = (inset, inset, W - 1 - inset, H - 1 - inset)
+        for step in range(11):
+            img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            if step < 10:
+                d = ImageDraw.Draw(img)
+                if step == 0:
+                    d.arc(bbox, start=-90, end=270, fill=(*track_rgb, 255), width=thickness)
+                else:
+                    sweep = int(360 * step / 10)
+                    d.arc(bbox, start=-90 + sweep, end=270, fill=(*track_rgb, 255), width=thickness)
+            frames.append(img)
         return 0, 0, frames
 
     if style in ("ring", "inner_ring"):

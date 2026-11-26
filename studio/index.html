@@ -871,14 +871,14 @@
               <select id="tsMode" onchange="syncTapUI(); schedulePreview();">
                 <option value="day_night">Day / Night Theme Gradients</option>
                 <option value="omnitrix_themes">Ben 10 Omnitrix Themes</option>
-                <option value="custom_images">Custom Uploaded Images (2–6)</option>
+                <option value="custom_images">Custom Uploaded Images (2–8)</option>
               </select>
             </div>
             <button type="button" class="btn btn-sm" onclick="cycleTapPreview()">Simulate Watch Tap · Next Scene ↻</button>
 
             <div id="tsDayNightBox" class="sub-box">
               <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:11.5px; font-weight:600;">Gradient Scenes (2–6)</span>
+                <span style="font-size:11.5px; font-weight:600;">Gradient Scenes (2–8)</span>
                 <button type="button" class="btn btn-xs" onclick="addTapTheme()">+ Theme</button>
               </div>
               <div id="tsThemesList" style="display:flex; flex-direction:column; gap:6px;"></div>
@@ -895,14 +895,14 @@
                 </select>
               </div>
               <div class="prop-row">
-                <label>Themes to Cycle (2–6)</label>
+                <label>Themes to Cycle (2–8)</label>
                 <div class="check-grid" id="tsOmniThemeChecks"></div>
               </div>
             </div>
 
             <div id="tsCustomBox" class="sub-box" style="display:none;">
               <div class="dropzone" id="tsDropzone" onclick="document.getElementById('tsFileInput').click()">
-                Add 2–6 scene images (PNG / JPG / WEBP)
+                Add 2–8 scene images (PNG / JPG / WEBP)
                 <input type="file" id="tsFileInput" accept="image/*" multiple style="display:none" onchange="addTapCustomImages(this.files); this.value='';" />
               </div>
               <div class="asset-grid" id="tsCustomGrid"></div>
@@ -1349,6 +1349,7 @@
               <label>Style</label>
               <select id="gStyle" onchange="onGaugeStyleChange(this.value)">
                 <option value="ring">Outer 360° Ring (01 12)</option>
+                <option value="ring_mask">Adaptive Color-Match Ring Mask (01 12)</option>
                 <option value="inner_ring">Inner 360° Ring (01 12)</option>
                 <option value="arc">Bottom Curved Arc (01 12)</option>
                 <option value="top_arc">Top Curved Arc (01 12)</option>
@@ -1644,7 +1645,8 @@
         if (!g) return null;
         const isNative = g.kind === "native_battery_bar" || g.style === "native_bar";
         const isOmniLow = g.style === "omnitrix_low_red";
-        const lbl = isNative ? "Batt Fill Bar (01 05)" : isOmniLow ? "Low-Batt Red (<50%)" : `Gauge · ${cap(g.metric || "battery")}`;
+        const isRingMask = g.style === "ring_mask";
+        const lbl = isNative ? "Batt Fill Bar (01 05)" : isOmniLow ? "Low-Batt Red (<50%)" : isRingMask ? "Adaptive Batt Ring" : `Gauge · ${cap(g.metric || "battery")}`;
         return { label: lbl, icon: isNative ? "🔋" : isOmniLow ? "⚡" : "◔", enabled: g.enabled !== false, removable: true };
       }
       if (tok.startsWith("overlay:")) {
@@ -1907,7 +1909,7 @@
     function syncGaugeFieldVisibility(style) {
       const isNative = style === "native_bar";
       const isOmniLow = style === "omnitrix_low_red";
-      const isRingOrArc = ["ring", "inner_ring", "arc", "top_arc", "left_arc", "right_arc"].includes(style);
+      const isRingOrArc = ["ring", "ring_mask", "inner_ring", "arc", "top_arc", "left_arc", "right_arc"].includes(style);
       const isPos = ["bar", "icon", "native_bar"].includes(style);
       document.getElementById("gMetricRow").style.display = (isNative || isOmniLow) ? "none" : "flex";
       document.getElementById("gBorderColRow").style.display = isNative ? "flex" : "none";
@@ -1925,6 +1927,7 @@
       g.kind = (style === "native_bar") ? "native_battery_bar" : "progress";
       if (style === "native_bar") { g.metric = "battery"; if (!g.width || g.width > 120) g.width = 56; g.height = g.height || 24; }
       if (style === "omnitrix_low_red") { g.metric = "battery"; g.color = "#ff1818"; g.threshold_pct = 50; g.brightness = 90; }
+      if (style === "ring_mask") { g.metric = "battery"; g.color = "#161a1e"; g.thickness = 8; g.radius_inset = 3; }
       bindGaugeInspector(g.id);
       renderLayerList();
       syncDragChips();
@@ -2118,7 +2121,7 @@
     }
 
     function addTapTheme() {
-      if (tapDayNightThemes.length >= 6) { toast("Max 6 tap-switch scenes.", true); return; }
+      if (tapDayNightThemes.length >= 8) { toast("Max 8 tap-switch scenes.", true); return; }
       tapDayNightThemes.push({ label: `Theme ${tapDayNightThemes.length + 1}`, c1: "#0a1020", c2: "#223b66" });
       syncTapUI();
       schedulePreview();
@@ -2139,7 +2142,7 @@
 
     function toggleTapOmniTheme(key, on) {
       if (on) {
-        if (tapOmniThemes.length >= 6) { toast("Max 6 themes can be cycled.", true); renderTapOmniChecks(); return; }
+        if (tapOmniThemes.length >= 8) { toast("Max 8 themes can be cycled.", true); renderTapOmniChecks(); return; }
         if (!tapOmniThemes.includes(key)) tapOmniThemes.push(key);
       } else {
         if (tapOmniThemes.length <= 2) { toast("Keep at least 2 themes for tap-to-switch.", true); renderTapOmniChecks(); return; }
@@ -2151,8 +2154,8 @@
 
     function addTapCustomImages(files) {
       if (!files || !files.length) return;
-      const remain = 6 - tapCustomFrames.length;
-      if (remain <= 0) { toast("Maximum 6 scenes reached.", true); return; }
+      const remain = 8 - tapCustomFrames.length;
+      if (remain <= 0) { toast("Maximum 8 scenes reached.", true); return; }
       Array.from(files).slice(0, remain).forEach(file => {
         if (!file.type.startsWith("image/") || file.size > 16 * 1024 * 1024) return;
         const r = new FileReader();
@@ -2169,7 +2172,7 @@
     function renderTapCustomGrid() {
       const grid = document.getElementById("tsCustomGrid");
       if (!tapCustomFrames.length) {
-        grid.innerHTML = '<div style="grid-column:1/-1; font-size:11px; color:var(--label-tertiary); text-align:center; padding:6px;">No scenes uploaded yet (need 2–6).</div>';
+        grid.innerHTML = '<div style="grid-column:1/-1; font-size:11px; color:var(--label-tertiary); text-align:center; padding:6px;">No scenes uploaded yet (need 2–8).</div>';
         return;
       }
       grid.innerHTML = tapCustomFrames.map((f, i) => `
@@ -2920,29 +2923,36 @@
       } else if (t === "alien_force_holograms") {
         document.getElementById("presetName").value = "Alien Force Holograms";
         loadConfigIntoUI({
-          layer_order: ["background", "tap_switch", "gauge:g_low_red", "hands"],
+          layer_order: ["background", "gauge:g_low_red", "tap_switch", "gauge:g_batt_ring", "hands"],
           background: {
             mode: "image",
-            image_path: "builtin://alien_force_holograms/bg_bezel.png",
+            image_path: "builtin://alien_force_holograms/bg_omnitrix_green.png",
             color: "#000000", color2: "#000000", brightness: 100, vignette: 0
           },
           tap_switch: {
             enabled: true, mode: "custom_images", size: 466, circular: true, opacity: 100, brightness: 100,
             x: 233, y: 233, preview_index: 0,
             frames: [
-              { label: "Swampfire",    image_path: "builtin://alien_force_holograms/ts_01_swampfire.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_01_swampfire.png" },
-              { label: "Humungousaur", image_path: "builtin://alien_force_holograms/ts_02_humungousaur.png", thumb_url: "/builtin-assets/alien_force_holograms/ts_02_humungousaur.png" },
-              { label: "Big Chill",    image_path: "builtin://alien_force_holograms/ts_03_bigchill.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_03_bigchill.png" },
-              { label: "Jetray",       image_path: "builtin://alien_force_holograms/ts_04_jetray.png",       thumb_url: "/builtin-assets/alien_force_holograms/ts_04_jetray.png" },
-              { label: "Echo Echo",    image_path: "builtin://alien_force_holograms/ts_05_echoecho.png",     thumb_url: "/builtin-assets/alien_force_holograms/ts_05_echoecho.png" },
-              { label: "Timeout Red",  image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png",  thumb_url: "/builtin-assets/alien_force_holograms/ts_06_timeout_red.png" }
+              { label: "Omnitrix (<50% Auto-Red)", image_path: "builtin://alien_force_holograms/ts_00_clear.png",       thumb_url: "/builtin-assets/alien_force_holograms/bg_omnitrix_green.png" },
+              { label: "Swampfire",                image_path: "builtin://alien_force_holograms/ts_01_swampfire.png",   thumb_url: "/builtin-assets/alien_force_holograms/ts_01_swampfire.png" },
+              { label: "Humungousaur",             image_path: "builtin://alien_force_holograms/ts_02_humungousaur.png",thumb_url: "/builtin-assets/alien_force_holograms/ts_02_humungousaur.png" },
+              { label: "Big Chill",                image_path: "builtin://alien_force_holograms/ts_03_bigchill.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_03_bigchill.png" },
+              { label: "Jetray",                   image_path: "builtin://alien_force_holograms/ts_04_jetray.png",      thumb_url: "/builtin-assets/alien_force_holograms/ts_04_jetray.png" },
+              { label: "Echo Echo",                image_path: "builtin://alien_force_holograms/ts_05_echoecho.png",    thumb_url: "/builtin-assets/alien_force_holograms/ts_05_echoecho.png" },
+              { label: "Timeout Red",              image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png", thumb_url: "/builtin-assets/alien_force_holograms/ts_06_timeout_red.png" }
             ]
           },
-          gauges: [{
-            id: "g_low_red", enabled: true, kind: "progress", metric: "battery", style: "omnitrix_low_red",
-            omni_style: "alien_force", color: "#ff1818", threshold_pct: 50, omni_glow: 1.0, omni_ticks: true,
-            brightness: 100, image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png"
-          }],
+          gauges: [
+            {
+              id: "g_low_red", enabled: true, kind: "progress", metric: "battery", style: "omnitrix_low_red",
+              omni_style: "alien_force", color: "#ff1818", threshold_pct: 50, omni_glow: 1.0, omni_ticks: true,
+              brightness: 100, image_path: "builtin://alien_force_holograms/ts_06_timeout_red.png"
+            },
+            {
+              id: "g_batt_ring", enabled: true, kind: "progress", metric: "battery", style: "ring_mask",
+              color: "#161a1e", thickness: 8, radius_inset: 3
+            }
+          ],
           analog_hands: { enabled: true, style: "omnitrix_glass", color: "#d8e2ec", accent_color: "#ffffff", show_seconds: true, center_cap: false },
           bezel: { enabled: false }, weather: { enabled: false }, bluetooth: { enabled: false },
           digital_clock: { enabled: false }, weekday: { enabled: false }, date: { enabled: false }, telemetry: { enabled: false }

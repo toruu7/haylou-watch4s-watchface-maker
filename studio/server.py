@@ -486,7 +486,7 @@ def resolve_config_assets(cfg, temp_dir=None, filename=None, persist_dir=None):
     # 2. Tap-to-Switch custom scene frames (01 1a)
     ts = cfg_copy.get("tap_switch")
     if isinstance(ts, dict) and isinstance(ts.get("frames"), list):
-        for idx, fr in enumerate(ts["frames"][:6]):
+        for idx, fr in enumerate(ts["frames"][:8]):
             if not isinstance(fr, dict):
                 continue
             fr.pop("thumb_url", None)
