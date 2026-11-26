@@ -76,6 +76,152 @@ os.makedirs(FONTS_DIR, exist_ok=True)
 
 _adb_cache = {"at": 0.0, "value": None}
 
+MAX_APK_UPLOAD_BYTES = 160 * 1024 * 1024
+WIRELESS_SHARE_PORT = int(os.environ.get("STUDIO_SHARE_PORT", "8468"))
+ALLOWED_PATCH_FLAGS = {
+    "--noclock", "--unlock-cards", "--rhr", "--vitality-vo2",
+    "--workout-analytics", "--hrv-active", "--hourly-charts",
+    "--night-raise-to-wake", "--cycling-fixes", "--voip-calls", "--all",
+}
+_uploaded_src_apk = {"path": "", "name": ""}
+_wireless_state = {"server": None, "thread": None, "apk_path": "", "lock": threading.Lock()}
+
+
+def get_lan_ips():
+    """Return local IPv4 addresses (LAN + Tailscale) for wireless phone downloads."""
+    ips = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            ips.append(ip)
+    except Exception:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and not ip.startswith("169.254.") and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+    return ips
+
+
+def _make_apk_share_handler(apk_path):
+    filename = os.path.basename(apk_path)
+
+    class ApkOnlyHandler(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            if os.environ.get("STUDIO_LOG"):
+                super().log_message(fmt, *args)
+
+        def do_HEAD(self):
+            self._serve(head_only=True)
+
+        def do_GET(self):
+            self._serve(head_only=False)
+
+        def _serve(self, head_only=False):
+            req_path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path).lstrip("/")
+            if req_path not in ("", filename) or not os.path.isfile(apk_path):
+                self.send_response(404)
+                self.end_headers()
+                return
+            size = os.path.getsize(apk_path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.android.package-archive")
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            if head_only:
+                return
+            try:
+                with open(apk_path, "rb") as f:
+                    shutil.copyfileobj(f, self.wfile, 64 * 1024)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+
+    return ApkOnlyHandler
+
+
+def start_wireless_share(apk_path):
+    with _wireless_state["lock"]:
+        stop_wireless_share_unlocked()
+        if not os.path.isfile(apk_path):
+            return {"ok": False, "error": "No built APK found to share."}
+        try:
+            srv = ThreadingHTTPServer(("0.0.0.0", WIRELESS_SHARE_PORT), _make_apk_share_handler(apk_path))
+        except OSError as exc:
+            return {"ok": False, "error": f"Could not bind port {WIRELESS_SHARE_PORT}: {exc}"}
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        _wireless_state["server"] = srv
+        _wireless_state["thread"] = t
+        _wireless_state["apk_path"] = apk_path
+        fname = os.path.basename(apk_path)
+        urls = [f"http://{ip}:{WIRELESS_SHARE_PORT}/{fname}" for ip in get_lan_ips()]
+        return {"ok": True, "running": True, "port": WIRELESS_SHARE_PORT, "filename": fname, "urls": urls}
+
+
+def stop_wireless_share_unlocked():
+    srv = _wireless_state.get("server")
+    if srv is not None:
+        try:
+            srv.shutdown()
+            srv.server_close()
+        except Exception:
+            pass
+    _wireless_state["server"] = None
+    _wireless_state["thread"] = None
+    _wireless_state["apk_path"] = ""
+
+
+def stop_wireless_share():
+    with _wireless_state["lock"]:
+        stop_wireless_share_unlocked()
+    return {"ok": True, "running": False, "urls": []}
+
+
+def get_apk_status():
+    built = []
+    for cand in (
+        os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-full-health.apk"),
+        os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-rhr.apk"),
+        os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8-noclock.apk"),
+    ):
+        if os.path.isfile(cand):
+            built.append({
+                "name": os.path.basename(cand),
+                "path": cand,
+                "size_mb": round(os.path.getsize(cand) / (1024 * 1024), 2),
+                "mtime": int(os.path.getmtime(cand)),
+            })
+    src_candidates = [
+        _uploaded_src_apk["path"],
+        os.path.join(os.path.expanduser("~"), "Downloads", "haylou-fun-v4-0-8.apk"),
+        os.path.join(PROJECT_DIR, "haylou-fun-v4-0-8.apk"),
+    ]
+    detected_src = next((p for p in src_candidates if p and os.path.isfile(p)), "")
+    with _wireless_state["lock"]:
+        running = _wireless_state["server"] is not None
+        shared_apk = _wireless_state["apk_path"]
+    fname = os.path.basename(shared_apk) if shared_apk else (built[0]["name"] if built else "")
+    urls = [f"http://{ip}:{WIRELESS_SHARE_PORT}/{fname}" for ip in get_lan_ips()] if (running and fname) else []
+    return {
+        "ok": True,
+        "built_apks": built,
+        "active_apk": built[0] if built else None,
+        "detected_src": detected_src,
+        "uploaded_src_name": _uploaded_src_apk["name"] if (_uploaded_src_apk["path"] and os.path.isfile(_uploaded_src_apk["path"])) else "",
+        "wireless_running": running,
+        "wireless_port": WIRELESS_SHARE_PORT,
+        "wireless_urls": urls,
+        "lan_ips": get_lan_ips(),
+    }
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -757,6 +903,48 @@ class StudioHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.guard()
 
+    def do_PUT(self):
+        if not self.guard():
+            return
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path != "/api/upload-src-apk":
+            self.send_json({"ok": False, "error": "Not found."}, 404)
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length <= 0 or length > MAX_APK_UPLOAD_BYTES:
+                self.send_json({"ok": False, "error": "Invalid APK size (limit 160 MB)."}, 400)
+                return
+            qs = urllib.parse.parse_qs(parsed.query)
+            fname = os.path.basename((qs.get("name", ["haylou-fun-v4-0-8.apk"])[0] or "haylou-fun-v4-0-8.apk").strip())
+            if not fname.lower().endswith(".apk"):
+                self.send_json({"ok": False, "error": "Please select an .apk file."}, 400)
+                return
+            dst = os.path.join(tempfile.gettempdir(), "watch4s_studio_src.apk")
+            rem = length
+            with open(dst, "wb") as f:
+                while rem > 0:
+                    chunk = self.rfile.read(min(rem, 256 * 1024))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    rem -= len(chunk)
+            if not zipfile.is_zipfile(dst):
+                os.remove(dst)
+                self.send_json({"ok": False, "error": "Uploaded file is not a valid APK/ZIP archive."}, 400)
+                return
+            _uploaded_src_apk["path"] = dst
+            _uploaded_src_apk["name"] = fname
+            self.send_json({
+                "ok": True,
+                "path": dst,
+                "name": fname,
+                "size_mb": round(os.path.getsize(dst) / (1024 * 1024), 2),
+                "message": f"Loaded source APK '{fname}'.",
+            })
+        except Exception as exc:
+            self.send_json({"ok": False, "error": f"Upload failed: {exc}"}, 500)
+
     def do_GET(self):
         if not self.guard():
             return
@@ -770,6 +958,8 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.end_headers()
         elif path == "/api/adb-status":
             self.send_json(check_adb())
+        elif path == "/api/apk-status":
+            self.send_json(get_apk_status())
         elif path == "/api/fonts":
             self.send_json({"fonts": get_all_fonts()})
         elif path == "/api/presets":
@@ -1180,6 +1370,54 @@ class StudioHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "message": "Pushed! Open Haylou Fun → Dial Center → install any free cloud dial."})
             else:
                 self.send_json({"ok": False, "error": "ADB push failed — unlock the phone and try again."}, 500)
+
+        elif path == "/api/patch-apk":
+            try:
+                src_path = (body.get("src_path") or "").strip() or get_apk_status().get("detected_src", "")
+                if not src_path or not os.path.isfile(src_path):
+                    self.send_json({"ok": False, "error": "Source Haylou Fun v4.0.8 APK not found. Upload it or provide its path first."}, 400)
+                    return
+                raw_flags = body.get("flags") or ["--all"]
+                flags = [f for f in raw_flags if isinstance(f, str) and f in ALLOWED_PATCH_FLAGS]
+                if not flags:
+                    self.send_json({"ok": False, "error": "Select at least one patch module."}, 400)
+                    return
+                night_hours = (body.get("night_hours") or "23:00-07:00").strip()
+                if not re.match(r"^\d{1,2}:\d{2}-\d{1,2}:\d{2}$", night_hours):
+                    self.send_json({"ok": False, "error": "Night hours must look like 23:00-07:00."}, 400)
+                    return
+                out_name = "haylou-fun-v4-0-8-noclock.apk" if flags == ["--noclock"] else "haylou-fun-v4-0-8-full-health.apk"
+                out_apk = os.path.join(PROJECT_DIR, out_name)
+                patcher_script = os.path.join(SCRIPTS_DIR, "patch_and_build_apk.py")
+                cmd = [sys.executable, patcher_script, "--src", src_path, "--out", out_apk, *flags]
+                if "--night-raise-to-wake" in flags or "--all" in flags:
+                    cmd.extend(["--night-hours", night_hours])
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=PROJECT_DIR)
+                log_out = ((res.stdout or "") + ("\n" + res.stderr if res.stderr else "")).strip()
+                if res.returncode != 0 or not os.path.isfile(out_apk):
+                    self.send_json({"ok": False, "error": f"Patch failed (exit {res.returncode}).", "log": log_out[-4000:]}, 500)
+                    return
+                self.send_json({
+                    "ok": True,
+                    "filename": out_name,
+                    "path": out_apk,
+                    "size_mb": round(os.path.getsize(out_apk) / (1024 * 1024), 2),
+                    "log": log_out[-4000:],
+                    "message": f"Built & signed {out_name} ({round(os.path.getsize(out_apk)/(1024*1024), 2)} MB)!",
+                })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": f"APK patch error: {exc}"}, 500)
+
+        elif path == "/api/wireless-share":
+            enable = bool(body.get("enable", True))
+            if not enable:
+                self.send_json(stop_wireless_share())
+                return
+            apk_path = (body.get("apk_path") or "").strip() or resolve_modded_apk()
+            if not apk_path or not os.path.isfile(apk_path):
+                st = get_apk_status()
+                apk_path = st["active_apk"]["path"] if st.get("active_apk") else ""
+            self.send_json(start_wireless_share(apk_path))
 
         elif path == "/api/install-apk":
             apk_path = resolve_modded_apk()

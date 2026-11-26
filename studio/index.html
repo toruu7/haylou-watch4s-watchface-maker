@@ -251,7 +251,7 @@
 
     .layer-list, .tpl-list { display: flex; flex-direction: column; gap: 2px; }
     .layer-hint {
-      font-size: 10.5px; color: var(--label-tertiary); padding: 0 6px 4px;
+      font-size: 11px; color: var(--label-tertiary); padding: 0 6px 4px;
       display: flex; justify-content: space-between;
     }
 
@@ -427,7 +427,7 @@
     }
     .insp-header h3 { font-size: 14.5px; font-weight: 600; letter-spacing: -0.015em; }
     .opcode-badge {
-      font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px;
       background: rgba(56, 189, 248, 0.14); color: #38bdf8;
       border: 1px solid rgba(56, 189, 248, 0.3); font-family: ui-monospace, Consolas, monospace;
     }
@@ -509,7 +509,7 @@
     }
     .asset-card .asset-idx {
       position: absolute; bottom: 3px; left: 4px;
-      font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; padding: 1px 4px; border-radius: 4px;
       background: rgba(0,0,0,0.7); color: #fff;
     }
 
@@ -606,7 +606,41 @@
     .gs-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
     .render-error { color: var(--red) !important; }
 
+    /* APK Patcher view */
+    #view-patcher { overflow-y: auto; padding: 26px 28px 48px; }
+    .patcher-inner { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+    .patcher-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; align-items: start; }
+    .patch-card {
+      background: var(--surface); border: 1px solid var(--hairline-strong);
+      border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;
+    }
+    .patch-card h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; }
+    .patch-card p { font-size: 12.5px; color: var(--label-secondary); line-height: 1.45; }
+    .patch-flag-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .patch-flag {
+      display: flex; align-items: flex-start; gap: 9px; padding: 9px 11px;
+      border-radius: 10px; border: 1px solid var(--hairline); background: rgba(255,255,255,0.025);
+      cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    }
+    .patch-flag:hover { border-color: var(--hairline-strong); background: rgba(255,255,255,0.045); }
+    .patch-flag input { margin-top: 2px; accent-color: var(--blue); }
+    .patch-flag b { display: block; font-size: 12.5px; font-weight: 600; color: var(--label); }
+    .patch-flag span { display: block; font-size: 11.5px; color: var(--label-secondary); margin-top: 2px; line-height: 1.35; }
+    .patch-log {
+      font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; line-height: 1.45;
+      background: #0a0b0e; color: #cbd5e1; border: 1px solid var(--hairline);
+      border-radius: 10px; padding: 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; display: none;
+    }
+    .wireless-url-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.035);
+      border: 1px solid var(--hairline); font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+    }
+    .wireless-url-row a { color: #60a5fa; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wireless-url-row a:hover { text-decoration: underline; }
+
     @media (max-width: 1024px) {
+      .patcher-grid, .patch-flag-list { grid-template-columns: 1fr; }
       html, body { height: auto; overflow: auto; }
       #view-designer.active { display: flex; flex-direction: column; height: auto; }
       .left-rail, .inspector { border: none; border-bottom: 1px solid var(--hairline); }
@@ -631,6 +665,7 @@
       <div class="seg-pill" id="segPill"></div>
       <button class="seg-btn active" role="tab" data-tab="presets" onclick="switchTab('presets')">Gallery</button>
       <button class="seg-btn" role="tab" data-tab="designer" onclick="switchTab('designer')">Studio</button>
+      <button class="seg-btn" role="tab" data-tab="patcher" onclick="switchTab('patcher')">APK Patcher</button>
     </div>
 
     <div class="title-right">
@@ -1403,7 +1438,7 @@
               <input type="file" id="ovFileInput" accept="image/*" style="display:none" onchange="uploadOverlayImage(this.files[0]); this.value='';" />
             </div>
             <div id="ovPreviewWrap" style="display:none; text-align:center;">
-              <img id="ovThumb" style="max-width:96px; max-height:96px; border-radius:8px; border:1px solid var(--hairline); background:#09090b;" alt="Sticker preview" />
+              <img id="ovThumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E" style="max-width:96px; max-height:96px; border-radius:8px; border:1px solid var(--hairline); background:#09090b;" alt="Sticker preview" />
             </div>
             <div class="prop-row"><label>Size <span class="tabular" id="ovSizeVal">120px</span></label><input type="range" id="ovSize" min="20" max="466" value="120" oninput="document.getElementById('ovSizeVal').textContent=this.value+'px'; updateActiveOverlay('size', parseInt(this.value))" /></div>
             <div class="prop-row"><label>Rotation <span class="tabular" id="ovRotVal">0°</span></label><input type="range" id="ovRot" min="-180" max="180" value="0" oninput="document.getElementById('ovRotVal').textContent=this.value+'°'; updateActiveOverlay('rotation', parseInt(this.value))" /></div>
@@ -1466,6 +1501,87 @@
           </div>
         </div>
       </aside>
+    </section>
+
+    <!-- APK PATCHER VIEW -->
+    <section id="view-patcher" class="view">
+      <div class="patcher-inner">
+        <div class="gallery-head">
+          <div>
+            <h2>Haylou Fun v4.0.8 APK Patcher</h2>
+            <p>Pure-Python DEX patcher &amp; v2/v3 APK signer — zero Java or Android SDK Build-Tools required.</p>
+          </div>
+          <div class="gallery-actions">
+            <button class="btn" type="button" onclick="refreshApkStatus()">Refresh Status</button>
+          </div>
+        </div>
+
+        <div class="patcher-grid">
+          <div class="patch-card">
+            <div>
+              <h3>1 · Source APK &amp; Patch Modules</h3>
+              <p>Select your official <code>haylou-fun-v4-0-8.apk</code>, choose the modules to include, and build a signed APK locally.</p>
+            </div>
+            <div class="dropzone" id="apkDropzone" onclick="document.getElementById('apkFileInput').click()">
+              <span id="apkSrcStatus">Click to upload official haylou-fun-v4-0-8.apk (or auto-detect from Downloads)</span>
+              <input type="file" id="apkFileInput" accept=".apk" style="display:none" onchange="uploadSrcApk(this.files[0]); this.value='';" />
+            </div>
+            <div class="prop-row">
+              <label>Source APK Path (optional override)</label>
+              <input type="text" id="apkSrcPathInput" placeholder="Auto-detected from ~/Downloads/haylou-fun-v4-0-8.apk" />
+            </div>
+
+            <div class="patch-flag-list" id="patchFlagList">
+              <label class="patch-flag"><input type="checkbox" value="--noclock" checked /><div><b>Watchface Sideload + FB Bypass</b><span>Suppresses 0xB0 clock overlay, bypasses FB signature, sideloads ls25plate.bin.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--unlock-cards" checked /><div><b>Unlock Hidden Watch 4S Cards</b><span>PAI, VO2 Max, HRV, Standing Hours, HR Alert (0x87), Sleep Naps (0xBC).</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--rhr" checked /><div><b>Resting Heart Rate Card</b><span>Adds 3rd RHR card to Heart Rate Details (Day/Week/Month/Year).</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--vitality-vo2" checked /><div><b>Vitality (PAI) &amp; VO2 Max Engine</b><span>On-device 30-day backfill + live updates on BLE HR sync.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--workout-analytics" checked /><div><b>Workout Analytics</b><span>Aerobic/Anaerobic TE (0.2–5.0), EPOC Load, Recovery Time &amp; VO2 Max.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--hrv-active" checked /><div><b>Stress-Derived HRV &amp; Active Hours</b><span>30-min HRV from 24/7 PPG Stress + 12h Standing Hours tracker.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--hourly-charts" checked /><div><b>Hourly Charts (BLE 0x59)</b><span>Unlocks 30-min step histograms &amp; Day (D) bar charts across Home/Steps.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--night-raise-to-wake" checked /><div><b>Night Raise-to-Wake Schedule</b><span>Wires DND schedule to BLE 0x72 wrist-wake off while keeping alerts on.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--cycling-fixes" checked /><div><b>Cycling Fixes &amp; Strava Cleanup</b><span>Strips phantom vibration steps, true moving time &amp; GPS auto-pause.</span></div></label>
+              <label class="patch-flag"><input type="checkbox" value="--voip-calls" checked /><div><b>VoIP Call Alerts + Wrist Reject</b><span>WhatsApp, Messenger, Telegram, Instagram, Discord caller ID &amp; reject.</span></div></label>
+            </div>
+
+            <div class="prop-inline">
+              <div class="prop-row">
+                <label>Night Raise-to-Wake Off Window</label>
+                <input type="text" id="apkNightHours" value="23:00-07:00" placeholder="23:00-07:00" />
+              </div>
+              <div class="prop-row" style="justify-content:flex-end;">
+                <button class="btn btn-primary" id="buildApkBtn" type="button" onclick="runApkPatch()">Build &amp; Sign Patched APK</button>
+              </div>
+            </div>
+            <pre class="patch-log" id="apkBuildLog"></pre>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:18px;">
+            <div class="patch-card">
+              <div>
+                <h3>2 · Built APK &amp; USB Install</h3>
+                <p id="builtApkSummary">Checking for existing patched APKs…</p>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-primary" type="button" onclick="installApk()">Install via USB (ADB)</button>
+              </div>
+              <p style="font-size:11.5px; color:var(--label-tertiary);">Reminder: Disable <b>Enable auto update</b> for Haylou Fun in Google Play Store so Play Store doesn't overwrite your patched build.</p>
+            </div>
+
+            <div class="patch-card">
+              <div>
+                <h3>3 · Wireless Phone Download (Wi-Fi / Tailscale)</h3>
+                <p>No USB cable nearby? Start a read-only local APK download server on port <code>8468</code> and open the link on your phone's browser.</p>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <button class="btn" id="wirelessShareBtn" type="button" onclick="toggleWirelessShare()">Start Wireless Download Server</button>
+                <span id="wirelessShareBadge" style="font-size:12px; color:var(--label-secondary);">Stopped</span>
+              </div>
+              <div id="wirelessUrlsWrap" style="display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -1589,6 +1705,7 @@
       updateSegPill();
       if (name === "presets") loadPresets();
       if (name === "designer") { renderLayerList(); schedulePreview(0); }
+      if (name === "patcher") refreshApkStatus();
     }
 
     window.addEventListener("resize", updateSegPill);
@@ -2203,7 +2320,7 @@
         const data = customHandsData[role];
         return `
           <div class="hand-slot">
-            <div class="hand-thumb">${data ? `<img src="${data}" alt="${title}" />` : '<span style="font-size:10px; color:var(--label-tertiary);">PNG</span>'}</div>
+            <div class="hand-thumb">${data ? `<img src="${data}" alt="${title}" />` : '<span style="font-size:11px; color:var(--label-tertiary);">PNG</span>'}</div>
             <div class="hand-meta"><b>${title}</b><span>${data ? "Custom PNG loaded" : sub}</span></div>
             <button type="button" class="btn btn-xs" onclick="document.getElementById('handUpload_${role}').click()">${data ? "Replace" : "Upload"}</button>
             ${data ? `<button type="button" class="btn btn-danger btn-xs" onclick="customHandsData.${role}=''; renderCustomHandSlots(); schedulePreview(0)">×</button>` : ""}
@@ -3294,6 +3411,126 @@
         toast(d.message); refreshAdb();
       } catch (err) { toast(err.message, true); }
       finally { btn.disabled = false; btn.textContent = "Install APK"; }
+    }
+
+    // ==================== APK PATCHER & WIRELESS SHARE ====================
+    let wirelessRunning = false;
+
+    async function refreshApkStatus() {
+      try {
+        const d = await apiJson("/api/apk-status");
+        const srcEl = document.getElementById("apkSrcStatus");
+        const pathEl = document.getElementById("apkSrcPathInput");
+        if (d.uploaded_src_name) {
+          srcEl.textContent = `Uploaded source APK: ${d.uploaded_src_name}`;
+        } else if (d.detected_src) {
+          srcEl.textContent = `Auto-detected: ${d.detected_src}`;
+          if (!pathEl.value) pathEl.value = d.detected_src;
+        } else {
+          srcEl.textContent = "Click to upload official haylou-fun-v4-0-8.apk (not found in ~/Downloads)";
+        }
+
+        const sumEl = document.getElementById("builtApkSummary");
+        if (d.built_apks && d.built_apks.length) {
+          sumEl.innerHTML = d.built_apks.map(a =>
+            `<b>${escapeHtml(a.name)}</b> (${a.size_mb} MB)`
+          ).join(" · ");
+        } else {
+          sumEl.textContent = "No patched APK built yet. Upload haylou-fun-v4-0-8.apk on the left and click Build.";
+        }
+
+        wirelessRunning = !!d.wireless_running;
+        renderWirelessState(d.wireless_urls || [], d.wireless_port || 8468);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+
+    function renderWirelessState(urls, port) {
+      const btn = document.getElementById("wirelessShareBtn");
+      const badge = document.getElementById("wirelessShareBadge");
+      const wrap = document.getElementById("wirelessUrlsWrap");
+      btn.textContent = wirelessRunning ? "Stop Wireless Server" : "Start Wireless Download Server";
+      btn.className = wirelessRunning ? "btn btn-danger" : "btn";
+      badge.textContent = wirelessRunning ? `Running on port ${port}` : "Stopped";
+      badge.style.color = wirelessRunning ? "var(--green)" : "var(--label-secondary)";
+      if (wirelessRunning && urls.length) {
+        wrap.innerHTML = urls.map(u => `
+          <div class="wireless-url-row">
+            <a href="${escapeHtml(u)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>
+            <button class="btn btn-xs" type="button" onclick="copyText('${escapeHtml(u)}')">Copy</button>
+          </div>`).join("");
+      } else {
+        wrap.innerHTML = "";
+      }
+    }
+
+    function copyText(text) {
+      navigator.clipboard?.writeText(text).then(() => toast("Copied link to clipboard.")).catch(() => toast("Copy failed.", true));
+    }
+
+    async function uploadSrcApk(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith(".apk")) { toast("Please choose a .apk file.", true); return; }
+      const srcEl = document.getElementById("apkSrcStatus");
+      srcEl.textContent = `Uploading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`;
+      try {
+        const d = await apiJson(`/api/upload-src-apk?name=${encodeURIComponent(file.name)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: file,
+        });
+        document.getElementById("apkSrcPathInput").value = d.path;
+        srcEl.textContent = `Loaded: ${d.name} (${d.size_mb} MB)`;
+        toast(d.message);
+      } catch (err) {
+        srcEl.textContent = "Upload failed — try again.";
+        toast(err.message, true);
+      }
+    }
+
+    async function runApkPatch() {
+      const checks = Array.from(document.querySelectorAll("#patchFlagList input[type=checkbox]:checked")).map(c => c.value);
+      if (!checks.length) { toast("Select at least one patch module.", true); return; }
+      const btn = document.getElementById("buildApkBtn");
+      const logEl = document.getElementById("apkBuildLog");
+      btn.disabled = true; btn.textContent = "Patching & Signing…";
+      logEl.style.display = "block";
+      logEl.textContent = "Running pure-Python DEX patcher & v2/v3 APK signer…";
+      try {
+        const d = await apiJson("/api/patch-apk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            src_path: document.getElementById("apkSrcPathInput").value.trim(),
+            flags: checks,
+            night_hours: document.getElementById("apkNightHours").value.trim() || "23:00-07:00",
+          }),
+        });
+        logEl.textContent = d.log || d.message;
+        toast(d.message);
+        refreshApkStatus();
+      } catch (err) {
+        logEl.textContent = err.message;
+        toast(err.message, true);
+      } finally {
+        btn.disabled = false; btn.textContent = "Build & Sign Patched APK";
+      }
+    }
+
+    async function toggleWirelessShare() {
+      try {
+        const d = await apiJson("/api/wireless-share", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enable: !wirelessRunning }),
+        });
+        wirelessRunning = !!d.running;
+        renderWirelessState(d.urls || [], d.port || 8468);
+        toast(wirelessRunning ? "Wireless APK download server started." : "Wireless server stopped.");
+      } catch (err) {
+        toast(err.message, true);
+      }
     }
 
     // Background image drag/drop
