@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -143,7 +144,7 @@ def check_adb():
     adb = find_adb()
     result = {"connected": False, "detail": "No phone connected via USB"}
     try:
-        res = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=4)
+        res = subprocess.run([adb, "devices", "-l"], capture_output=True, text=True, timeout=10)
         if res.returncode != 0:
             result = {"connected": False, "detail": "ADB not found or failed to start"}
         else:
@@ -646,24 +647,30 @@ class StudioHandler(BaseHTTPRequestHandler):
 
     def send_json(self, obj, status=200):
         raw = json.dumps(obj).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def send_bytes(self, raw, content_type, filename=None):
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        if filename:
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def send_file(self, path, content_type):
         if not os.path.isfile(path):
@@ -696,6 +703,9 @@ class StudioHandler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             self.send_file(os.path.join(STUDIO_DIR, "index.html"), "text/html; charset=utf-8")
+        elif path == "/favicon.ico":
+            self.send_response(204)
+            self.end_headers()
         elif path == "/api/adb-status":
             self.send_json(check_adb())
         elif path == "/api/fonts":
@@ -1128,9 +1138,22 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.send_json({"ok": False, "error": "Not found."}, 404)
 
 
+class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+    """Prevent Windows SO_REUSEADDR from silently binding a second server behind a stale instance."""
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            except OSError:
+                pass
+        super().server_bind()
+
+
 def main():
     try:
-        server = ThreadingHTTPServer((HOST, PORT), StudioHandler)
+        server = ExclusiveThreadingHTTPServer((HOST, PORT), StudioHandler)
     except OSError as exc:
         print(f"Cannot start Studio on {HOST}:{PORT}: {exc}")
         print("Another process may be using the port. Set STUDIO_PORT to a different value.")

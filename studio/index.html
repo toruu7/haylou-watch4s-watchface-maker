@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Watch 4S Studio</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23141416' stroke='%2300e5ff' stroke-width='2.5'/%3E%3Cpolyline points='16 9 16 16 21 19' fill='none' stroke='%23f5f5f7' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
   <style>
     :root {
       /* Apple macOS Sequoia Dark Mode Material Tokens */
@@ -1531,6 +1532,7 @@
     let dragTarget = "clock";        // sub-target id for canvas dragging
     let previewTimer = null;
     let previewSeq = 0;
+    let checkSeq = 0;
     let previewAbort = null;
     let idCounter = 10;
     const ONBOARD_KEY = "studio-onboarding:v2";
@@ -2247,7 +2249,14 @@
       if (tok.startsWith("overlay:")) return [{ id: tok, label: "Sticker" }];
       if (tok.startsWith("text:")) return [{ id: tok, label: "Text" }];
       if (tok.startsWith("anim:")) return [{ id: tok, label: "GIF Zone" }];
-      return [{ id: "clock", label: "Clock" }, { id: "date", label: "Date" }, { id: "weekday", label: "Weekday" }];
+      const activeOpts = [];
+      if (document.getElementById("clkEnabled")?.checked) activeOpts.push({ id: "clock", label: "Clock" });
+      if (document.getElementById("dateEnabled")?.checked) activeOpts.push({ id: "date", label: "Date" });
+      if (document.getElementById("wkEnabled")?.checked) activeOpts.push({ id: "weekday", label: "Weekday" });
+      if (document.getElementById("wEnabled")?.checked) activeOpts.push({ id: "weather_icon", label: "Weather" });
+      if (document.getElementById("btEnabled")?.checked) activeOpts.push({ id: "bluetooth", label: "BT" });
+      if (document.getElementById("tsEnabled")?.checked) activeOpts.push({ id: "tap_switch", label: "Tap-Switch" });
+      return activeOpts;
     }
 
     function syncDragChips(autoPick = false) {
@@ -2848,6 +2857,9 @@
           "weather", "bluetooth", "weekday", "date", "clock", "telemetry", "hands"
         ];
       }
+      checkSeq++;
+      const cb = document.getElementById("checkBinBtn");
+      if (cb) { cb.disabled = false; cb.textContent = "Check .bin"; }
       document.getElementById("binBudgetMeta").textContent = "";
       renderLayerList();
     }
@@ -2931,7 +2943,7 @@
         });
       } else if (t === "pure") {
         document.getElementById("presetName").value = "Pure Custom Photo";
-        loadConfigIntoUI({ background: { mode: "image", image_data: inlineBgData, brightness: 80, vignette: 15 } });
+        loadConfigIntoUI({ background: { mode: "image", image_data: inlineBgData, color: "#0f172a", color2: "#1e293b", brightness: 85, vignette: 15 } });
       } else if (t === "stacked_neon") {
         document.getElementById("presetName").value = "Stacked Neon";
         loadConfigIntoUI({
@@ -3009,19 +3021,21 @@
     async function checkBinSize() {
       const btn = document.getElementById("checkBinBtn");
       const meta = document.getElementById("binBudgetMeta");
+      const seq = ++checkSeq;
       btn.disabled = true; btn.textContent = "Checking…";
       try {
         const d = await apiJson("/api/inspect-compile", {
           method: "POST", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({ config: getConfig() })
         });
+        if (seq !== checkSeq) return;
         const cls = d.within_flash_budget ? "budget-ok" : "budget-warn";
         meta.innerHTML = `<span class="${cls}">${d.size_kb} / ${d.max_kb} KB · ${d.opcodes.length} opcodes</span>`;
         toast(d.within_flash_budget
           ? `Valid Watch 4S .bin (${d.size_kb} KB, ${d.opcodes.length} opcodes, ${d.digit_tables} digit table${d.digit_tables === 1 ? "" : "s"}).`
           : `Warning: ${d.size_kb} KB exceeds the ${d.max_kb} KB flash budget — reduce GIF frames or scene sizes.`, !d.within_flash_budget);
-      } catch (err) { toast(err.message, true); }
-      finally { btn.disabled = false; btn.textContent = "Check .bin"; }
+      } catch (err) { if (seq === checkSeq) toast(err.message, true); }
+      finally { if (seq === checkSeq) { btn.disabled = false; btn.textContent = "Check .bin"; } }
     }
 
     async function savePreset(push) {
