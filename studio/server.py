@@ -60,6 +60,7 @@ BUNDLE_FILES = (
 SAFE_ASSET_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 sys.path.insert(0, SCRIPTS_DIR)
+from amazfit_unpacker import unpack_amazfit_bin
 from watchface_bin_maker import find_adb, push_bin_to_phone
 from watchface_compiler import (
     MAX_WATCH_BIN_BYTES,
@@ -1222,6 +1223,32 @@ class StudioHandler(BaseHTTPRequestHandler):
                 return
             shutil.rmtree(pdir, ignore_errors=True)
             self.send_json({"ok": True})
+
+        elif path == "/api/import-amazfit":
+            try:
+                name = (body.get("name") or "").strip()[:80] or "Amazfit Import"
+                b64 = body.get("bin_data", "")
+                if "," in b64:
+                    b64 = b64.split(",", 1)[1]
+                raw = base64.b64decode(b64)
+                if len(raw) > MAX_BIN_BYTES:
+                    self.send_json({"ok": False, "error": "Amazfit .bin too large (limit 8 MB)."}, 400)
+                    return
+                res = unpack_amazfit_bin(raw)
+                buf = io.BytesIO()
+                res["background"].save(buf, format="PNG", optimize=True)
+                bg_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+                w, h = res["source_size"]
+                self.send_json({
+                    "ok": True,
+                    "name": name,
+                    "background_data": bg_b64,
+                    "source_size": [w, h],
+                    "total_images": res["total_images"],
+                    "message": f"Unpacked Amazfit .bin ({w}×{h} → 466×466, {res['total_images']} assets found). Ready in Studio!",
+                })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": f"Amazfit import failed: {exc}"}, 400)
 
         elif path == "/api/import-bin":
             try:
