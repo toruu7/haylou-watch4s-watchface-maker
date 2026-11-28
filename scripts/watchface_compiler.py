@@ -1831,6 +1831,82 @@ def build_battery_widget(batt_cfg):
             frames.append(img)
         return 0, 0, frames
 
+    if style == "pixel_bar":
+        # Retro 16-bit SNES/GBA segmented HP/MP bar (supports invert=True so Boss HP shrinks as Steps rise!)
+        bw = max(60, min(260, int(batt_cfg.get("width", 180))))
+        bh = max(12, min(32, int(batt_cfg.get("height", thickness + 10))))
+        bx = max(0, min(W - bw, int(batt_cfg.get("x", 233)) - bw // 2))
+        by = max(0, min(H - bh, int(batt_cfg.get("y", 104)) - bh // 2))
+        invert = bool(batt_cfg.get("invert", False))
+        ko_text = str(batt_cfg.get("ko_text", "K.O.!" if invert else ""))
+        track_rgb = _safe_hex_rgb(batt_cfg.get("track_color", "#14101c"), (20, 16, 28))
+        border_rgb = _safe_hex_rgb(batt_cfg.get("border_color", "#e2e8f0"), (226, 232, 240))
+        ko_font = load_font(batt_cfg.get("font_path"), max(10, bh - 4)) if ko_text else None
+        for step in range(11):
+            eff = (10 - step) if invert else step
+            img = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            # Crisp double pixel border
+            d.rectangle((0, 0, bw - 1, bh - 1), fill=(*track_rgb, 245), outline=(8, 10, 16, 255), width=2)
+            d.rectangle((2, 2, bw - 3, bh - 3), outline=(*border_rgb, 240), width=1)
+            inner_x0, inner_y0 = 4, 4
+            inner_w = max(4, bw - 8)
+            inner_h = max(4, bh - 8)
+            if eff > 0:
+                fw = max(4, int(inner_w * eff / 10))
+                if invert:
+                    # Boss HP color progression: green/crimson -> amber -> critical bright red
+                    if eff <= 2:
+                        fill_c = (255, 42, 62, 255)
+                        hi_c = (255, 160, 165, 255)
+                    elif eff <= 5:
+                        fill_c = (245, 158, 11, 255)
+                        hi_c = (254, 230, 138, 255)
+                    else:
+                        fill_c = (*col_rgb, 255)
+                        hi_c = (min(255, col_rgb[0] + 75), min(255, col_rgb[1] + 75), min(255, col_rgb[2] + 75), 255)
+                else:
+                    c_base = (255, 55, 65) if (low_red and eff <= 2) else col_rgb
+                    fill_c = (*c_base, 255)
+                    hi_c = (min(255, c_base[0] + 70), min(255, c_base[1] + 70), min(255, c_base[2] + 70), 255)
+                d.rectangle((inner_x0, inner_y0, inner_x0 + fw - 1, inner_y0 + inner_h - 1), fill=fill_c)
+                # Top 2px 16-bit specular pixel highlight strip
+                d.rectangle((inner_x0, inner_y0, inner_x0 + fw - 1, inner_y0 + min(2, inner_h - 1)), fill=hi_c)
+                # Subtle 10-segment pixel dividers
+                for seg in range(1, 10):
+                    sx = inner_x0 + int(inner_w * seg / 10)
+                    if sx < inner_x0 + fw:
+                        d.line([(sx, inner_y0), (sx, inner_y0 + inner_h - 1)], fill=(12, 10, 18, 150), width=1)
+            elif ko_text and ko_font is not None:
+                bb = d.textbbox((0, 0), ko_text, font=ko_font)
+                tw, th = bb[2] - bb[0], bb[3] - bb[1]
+                d.text(((bw - tw) // 2 - bb[0], (bh - th) // 2 - bb[1]), ko_text, font=ko_font, fill=(255, 224, 72, 255))
+            frames.append(img)
+        return bx, by, frames
+
+    if style == "subdial_arc":
+        # Compact curved horological power-reserve / subdial arc positioned anywhere at (x, y)
+        sz = max(44, min(160, int(batt_cfg.get("size", 88))))
+        bx = max(0, min(W - sz, int(batt_cfg.get("x", 126)) - sz // 2))
+        by = max(0, min(H - sz, int(batt_cfg.get("y", 233)) - sz // 2))
+        a_start = int(batt_cfg.get("start_angle", 125))
+        a_end = int(batt_cfg.get("end_angle", 235))
+        span = a_end - a_start
+        track_rgb = _safe_hex_rgb(batt_cfg.get("track_color", "#26303d"), (38, 48, 61))
+        pad = max(4, thickness // 2 + 2)
+        S = 2
+        for step in range(11):
+            img = Image.new("RGBA", (sz * S, sz * S), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            box = (pad * S, pad * S, (sz - 1 - pad) * S, (sz - 1 - pad) * S)
+            d.arc(box, start=a_start, end=a_end, fill=(*track_rgb, 190), width=thickness * S)
+            if step > 0:
+                sweep = int(span * step / 10)
+                c = (255, 58, 48, 255) if (low_red and step <= 2) else (*col_rgb, 255)
+                d.arc(box, start=a_end - sweep, end=a_end, fill=c, width=thickness * S)
+            frames.append(img.resize((sz, sz), Image.Resampling.LANCZOS))
+        return bx, by, frames
+
     if style == "bar":
         bw = max(60, min(260, int(batt_cfg.get("width", 120))))
         bh = max(12, thickness + 8)
@@ -2058,7 +2134,10 @@ def _render_scene(config, anim_frame_idx=0, sec_val=35, blink_on=True, prebuilt_
             comp.paste(sp, (nb["x"], nb["y"]), sp)
         else:
             bx, by, bframes = build_battery_widget(g)
-            preview_idx = 2 if (g.get("style") == "omnitrix_low_red" and g.get("preview_low")) else 8
+            preview_idx = (
+                2 if (g.get("style") == "omnitrix_low_red" and g.get("preview_low"))
+                else (4 if g.get("invert") else 8)
+            )
             comp.paste(bframes[preview_idx], (bx, by), bframes[preview_idx])
 
     def draw_overlay(o):

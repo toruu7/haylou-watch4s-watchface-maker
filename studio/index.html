@@ -741,10 +741,12 @@
         <div>
           <div class="rail-head"><div class="rail-group-title">Templates</div></div>
           <div class="tpl-list">
-            <button class="tpl-btn" onclick="applyTemplate('tactical_hud')">Tactical Weather HUD <span class="tpl-swatch" style="background:#00e5ff"></span></button>
-            <button class="tpl-btn" onclick="applyTemplate('omni_tap')">Omnitrix · Tap-Switch <span class="tpl-swatch" style="background:#39ff14"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('rpg_boss_battle')">16-Bit RPG Boss Battle <span class="tpl-swatch" style="background:linear-gradient(135deg,#34d366 33%,#38d8ff 33%,#38d8ff 66%,#a855f7 66%)"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('xray_caseback')">X-Ray Caseback Peeler <span class="tpl-swatch" style="background:linear-gradient(135deg,#2c3544 33%,#38bdf8 33%,#38bdf8 66%,#f97316 66%)"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('alien_force_holograms')">Alien Force · 5 Holograms <span class="tpl-swatch" style="background:linear-gradient(135deg,#39ff14 55%,#ff1818 55%)"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('pipboy_3000')">Pip-Boy 3000 · 4 Themes <span class="tpl-swatch" style="background:linear-gradient(135deg,#08f57c 33%,#ffb010 33%,#ffb010 66%,#0ae4ff 66%)"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('tactical_hud')">Tactical Weather HUD <span class="tpl-swatch" style="background:#00e5ff"></span></button>
+            <button class="tpl-btn" onclick="applyTemplate('omni_tap')">Omnitrix · Tap-Switch <span class="tpl-swatch" style="background:#39ff14"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('diver_chrono')">Diver Chronograph <span class="tpl-swatch" style="background:#f59e0b"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('fitness_hud')">Fitness HUD · All Live <span class="tpl-swatch" style="background:#38bdf8"></span></button>
             <button class="tpl-btn" onclick="applyTemplate('stacked_neon')">Stacked Neon <span class="tpl-swatch" style="background:#00f0ff"></span></button>
@@ -1394,6 +1396,8 @@
                 <option value="left_arc">Left Curved Arc (01 12)</option>
                 <option value="right_arc">Right Curved Arc (01 12)</option>
                 <option value="bar">Horizontal Bar (01 12)</option>
+                <option value="pixel_bar">16-Bit Pixel HP/MP Bar (01 12)</option>
+                <option value="subdial_arc">Horological Sub-Dial Arc (01 12)</option>
                 <option value="icon">Battery Pill Icon (01 12)</option>
                 <option value="omnitrix_low_red">Omnitrix &lt;50% Red Timeout (01 12)</option>
                 <option value="native_bar">Native Dynamic Battery Fill Bar (01 05)</option>
@@ -2030,12 +2034,12 @@
       const isNative = style === "native_bar";
       const isOmniLow = style === "omnitrix_low_red";
       const isRingOrArc = ["ring", "ring_mask", "inner_ring", "arc", "top_arc", "left_arc", "right_arc"].includes(style);
-      const isPos = ["bar", "icon", "native_bar"].includes(style);
+      const isPos = ["bar", "pixel_bar", "subdial_arc", "icon", "native_bar"].includes(style);
       document.getElementById("gMetricRow").style.display = (isNative || isOmniLow) ? "none" : "flex";
       document.getElementById("gBorderColRow").style.display = isNative ? "flex" : "none";
       document.getElementById("gThickRow").style.display = (isNative || isOmniLow) ? "none" : "flex";
       document.getElementById("gInsetRow").style.display = isRingOrArc ? "flex" : "none";
-      document.getElementById("gDimRow").style.display = (isNative || style === "bar") ? "flex" : "none";
+      document.getElementById("gDimRow").style.display = (isNative || style === "bar" || style === "pixel_bar") ? "flex" : "none";
       document.getElementById("gPosBox").style.display = isPos ? "flex" : "none";
     }
 
@@ -2147,7 +2151,7 @@
       if (!a) return;
       document.getElementById("anEnabled").checked = a.enabled !== false;
       document.getElementById("anName").value = a.name || "GIF Zone";
-      document.getElementById("anDropLabel").textContent = a.image_data ? "Animated asset loaded — click to replace" : "Upload animated GIF or WebP loop (max 3 zones)";
+      document.getElementById("anDropLabel").textContent = (a.image_data || a.image_path) ? "Animated asset loaded — click to replace" : "Upload animated GIF or WebP loop (max 3 zones)";
       document.getElementById("anFrames").value = a.frames ?? 6;
       document.getElementById("anFramesVal").textContent = a.frames ?? 6;
       document.getElementById("anFps").value = a.fps ?? 5;
@@ -3075,6 +3079,105 @@
           bezel: { enabled: false }, weather: { enabled: false }, bluetooth: { enabled: false },
           digital_clock: { enabled: false }, weekday: { enabled: false }, date: { enabled: false }, telemetry: { enabled: false }
         });
+      } else if (t === "rpg_boss_battle") {
+        document.getElementById("presetName").value = "16-Bit RPG Boss Battle";
+        loadConfigIntoUI({
+          layer_order: ["background", "tap_switch", "anim:an_hero", "gauge:g_boss_hp", "gauge:g_hero_mp", "weather", "weekday", "date", "clock", "telemetry", "bluetooth"],
+          background: { mode: "solid", color: "#080a14", color2: "#080a14", brightness: 100, vignette: 0 },
+          tap_switch: {
+            enabled: true, mode: "custom_images", size: 466, circular: true, opacity: 100, brightness: 100,
+            x: 233, y: 233, preview_index: 0,
+            frames: [
+              { label: "LV.15 Slime King",  image_path: "builtin://rpg_boss_battle/bg_01_slime.png",  thumb_url: "/builtin-assets/rpg_boss_battle/bg_01_slime.png" },
+              { label: "LV.42 Frost Wyrm",  image_path: "builtin://rpg_boss_battle/bg_02_dragon.png", thumb_url: "/builtin-assets/rpg_boss_battle/bg_02_dragon.png" },
+              { label: "LV.78 Mecha-X",     image_path: "builtin://rpg_boss_battle/bg_03_mecha.png",  thumb_url: "/builtin-assets/rpg_boss_battle/bg_03_mecha.png" },
+              { label: "LV.99 Shadow Lich", image_path: "builtin://rpg_boss_battle/bg_04_lich.png",   thumb_url: "/builtin-assets/rpg_boss_battle/bg_04_lich.png" }
+            ]
+          },
+          anim_sprites: [
+            {
+              id: "an_hero", name: "Pixel Hero Knight", enabled: true,
+              image_path: "builtin://rpg_boss_battle/hero_knight_idle.webp",
+              frames: 6, fps: 4, size: 84, circular: false, brightness: 100, x: 120, y: 306
+            }
+          ],
+          gauges: [
+            {
+              id: "g_boss_hp", enabled: true, kind: "progress", metric: "steps", style: "pixel_bar",
+              invert: true, ko_text: "K.O.!", color: "#ef4444", track_color: "#161020", border_color: "#f1f5f9",
+              width: 196, height: 18, thickness: 8, x: 248, y: 108
+            },
+            {
+              id: "g_hero_mp", enabled: true, kind: "progress", metric: "battery", style: "pixel_bar",
+              invert: false, color: "#38bdf8", track_color: "#0c182c", border_color: "#bae6fd",
+              width: 132, height: 14, thickness: 6, x: 280, y: 353
+            }
+          ],
+          weekday: { enabled: true, x: 158, y: 50, font_size: 16, color: "#fde047", stroke_width: 1, uppercase: true },
+          date: { enabled: true, format: "MM/DD", show_year: false, x: 229, y: 50, font_size: 15, color: "#f8fafc", stroke_width: 1 },
+          weather: {
+            enabled: true, show_icon: true, icon_style: "color", icon_color: "#38bdf8", icon_size: 20,
+            icon_x: 283, icon_y: 50, show_temp: true, temp_x: 312, temp_y: 50, font_size: 14, color: "#e2e8f0", stroke_width: 1
+          },
+          digital_clock: {
+            enabled: true, layout: "horizontal", x: 263, y: 306,
+            font_size: 42, color: "#ffffff", color2: "#fde047",
+            stroke_width: 2, stroke_color: "#080a14", glow_radius: 1, spacing: 2,
+            show_colon: true, show_seconds: true, seconds_size: 18, seconds_color: "#38bdf8", show_ampm: false
+          },
+          telemetry: {
+            enabled: true, show_icons: false, font_size: 17, color: "#f8fafc", stroke_width: 1, align: 0,
+            steps:       { enabled: true, x: 150, y: 396, align: 0 },
+            heart_rate:  { enabled: true, x: 266, y: 396, align: 0 },
+            battery_pct: { enabled: true, x: 354, y: 344, align: 0 },
+            calories:    { enabled: false, x: 156, y: 350, align: 2 },
+            distance:    { enabled: false, x: 295, y: 350, align: 2 }
+          },
+          bluetooth: { enabled: true, style: "dot_ring", connected_color: "#38bdf8", disconnected_color: "#ef4444", size: 16, x: 233, y: 440, preview_connected: true },
+          analog_hands: { enabled: false }, bezel: { enabled: false }
+        });
+      } else if (t === "xray_caseback") {
+        document.getElementById("presetName").value = "X-Ray Caseback Peeler";
+        loadConfigIntoUI({
+          layer_order: ["background", "tap_switch", "anim:an_tourbillon", "gauge:g_reserve", "weekday", "date", "telemetry", "hands"],
+          background: { mode: "solid", color: "#080a10", color2: "#080a10", brightness: 100, vignette: 0 },
+          tap_switch: {
+            enabled: true, mode: "custom_images", size: 466, circular: true, opacity: 100, brightness: 100,
+            x: 233, y: 233, preview_index: 0,
+            frames: [
+              { label: "1 · Dark Titanium Dress",   image_path: "builtin://xray_caseback/layer_01_dress.png",     thumb_url: "/builtin-assets/xray_caseback/layer_01_dress.png" },
+              { label: "2 · Open-Heart Skeleton",   image_path: "builtin://xray_caseback/layer_02_skeleton.png",  thumb_url: "/builtin-assets/xray_caseback/layer_02_skeleton.png" },
+              { label: "3 · CAD Blueprint",         image_path: "builtin://xray_caseback/layer_03_blueprint.png", thumb_url: "/builtin-assets/xray_caseback/layer_03_blueprint.png" },
+              { label: "4 · FLIR Thermal Scan",     image_path: "builtin://xray_caseback/layer_04_thermal.png",   thumb_url: "/builtin-assets/xray_caseback/layer_04_thermal.png" }
+            ]
+          },
+          anim_sprites: [
+            {
+              id: "an_tourbillon", name: "Spinning Tourbillon", enabled: true,
+              image_path: "builtin://xray_caseback/tourbillon_wheel.webp",
+              frames: 8, fps: 6, size: 80, circular: true, brightness: 100, x: 233, y: 326
+            }
+          ],
+          gauges: [
+            {
+              id: "g_reserve", enabled: true, kind: "progress", metric: "battery", style: "subdial_arc",
+              color: "#f59e0b", track_color: "#26303d", thickness: 5, size: 80,
+              start_angle: 125, end_angle: 235, x: 122, y: 233
+            }
+          ],
+          weekday: { enabled: true, x: 233, y: 128, font_size: 17, color: "#cbd5e1", stroke_width: 1, uppercase: true },
+          date: { enabled: true, format: "DD", show_year: false, x: 348, y: 233, font_size: 21, color: "#f8fafc", stroke_width: 1 },
+          telemetry: {
+            enabled: true, show_icons: false, font_size: 16, color: "#e2e8f0", stroke_width: 1, align: 2,
+            heart_rate:  { enabled: true, x: 132, y: 219, align: 2 },
+            steps:       { enabled: false, x: 233, y: 368, align: 2 },
+            calories:    { enabled: false, x: 328, y: 298, align: 2 },
+            distance:    { enabled: false, x: 233, y: 405, align: 2 },
+            battery_pct: { enabled: false, x: 233, y: 58, align: 2 }
+          },
+          analog_hands: { enabled: true, style: "dauphine", color: "#f59e0b", accent_color: "#f1f5f9", show_seconds: true, center_cap: true },
+          digital_clock: { enabled: false }, bezel: { enabled: false }, weather: { enabled: false }, bluetooth: { enabled: false }
+        });
       } else if (t === "pipboy_3000") {
         document.getElementById("presetName").value = "Pip-Boy 3000 Multi-Theme";
         loadConfigIntoUI({
@@ -3187,7 +3290,7 @@
           weekday: { enabled: true, x: 233, y: 142, font_size: 20, color: "#e2e8f0", uppercase: true }
         });
       }
-      selectLayer((t === "omni_tap" || t === "alien_force_holograms" || t === "pipboy_3000") ? "tap_switch" : "background");
+      selectLayer((t === "omni_tap" || t === "alien_force_holograms" || t === "pipboy_3000" || t === "rpg_boss_battle" || t === "xray_caseback") ? "tap_switch" : "background");
       schedulePreview(0);
     }
 

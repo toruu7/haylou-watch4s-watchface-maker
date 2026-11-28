@@ -131,6 +131,99 @@ class TestWatchfaceCompiler(unittest.TestCase):
             self.assertIn("01 1a", info["opcodes"])
             self.assertLessEqual(len(raw), watchface_compiler.MAX_WATCH_BIN_BYTES)
 
+    def test_builtin_rpg_boss_battle_template_compiles_under_budget(self):
+        rdir = os.path.join(REPO_ROOT, "studio", "assets", "rpg_boss_battle")
+        boss_files = ["bg_01_slime.png", "bg_02_dragon.png", "bg_03_mecha.png", "bg_04_lich.png"]
+        frames = []
+        for fn in boss_files:
+            fp = os.path.join(rdir, fn)
+            self.assertTrue(os.path.isfile(fp), f"Missing {fp}")
+            frames.append({"label": fn, "image_path": fp})
+        hero_fp = os.path.join(rdir, "hero_knight_idle.webp")
+        self.assertTrue(os.path.isfile(hero_fp), f"Missing {hero_fp}")
+
+        # Verify inverted pixel_bar gauge produces 11 frames where step=0 (full Boss HP) != step=10 (K.O.!)
+        _gx, _gy, g_frames = watchface_compiler.build_battery_widget({
+            "metric": "steps", "style": "pixel_bar", "invert": True, "ko_text": "K.O.!",
+            "color": "#ef4444", "width": 196, "height": 18, "x": 248, "y": 108,
+        })
+        self.assertEqual(len(g_frames), 11)
+        self.assertNotEqual(g_frames[0].tobytes(), g_frames[10].tobytes())
+
+        cfg = {
+            "layer_order": ["background", "tap_switch", "anim:an_hero", "gauge:g_boss_hp", "gauge:g_hero_mp", "weather", "weekday", "date", "clock", "telemetry", "bluetooth"],
+            "background": {"mode": "solid", "color": "#080a14", "color2": "#080a14", "brightness": 100, "vignette": 0},
+            "tap_switch": {"enabled": True, "mode": "custom_images", "size": 466, "circular": True, "opacity": 100, "brightness": 100, "x": 233, "y": 233, "frames": frames},
+            "anim_sprites": [{"id": "an_hero", "name": "Pixel Hero Knight", "enabled": True, "image_path": hero_fp, "frames": 6, "fps": 4, "size": 84, "circular": False, "brightness": 100, "x": 120, "y": 306}],
+            "gauges": [
+                {"id": "g_boss_hp", "enabled": True, "kind": "progress", "metric": "steps", "style": "pixel_bar", "invert": True, "ko_text": "K.O.!", "color": "#ef4444", "track_color": "#161020", "border_color": "#f1f5f9", "width": 196, "height": 18, "thickness": 8, "x": 248, "y": 108},
+                {"id": "g_hero_mp", "enabled": True, "kind": "progress", "metric": "battery", "style": "pixel_bar", "invert": False, "color": "#38bdf8", "track_color": "#0c182c", "border_color": "#bae6fd", "width": 132, "height": 14, "thickness": 6, "x": 280, "y": 353},
+            ],
+            "weekday": {"enabled": True, "x": 158, "y": 50, "font_size": 16, "color": "#fde047", "stroke_width": 1, "uppercase": True},
+            "date": {"enabled": True, "format": "MM/DD", "show_year": False, "x": 229, "y": 50, "font_size": 15, "color": "#f8fafc", "stroke_width": 1},
+            "weather": {"enabled": True, "show_icon": True, "icon_style": "color", "icon_color": "#38bdf8", "icon_size": 20, "icon_x": 283, "icon_y": 50, "show_temp": True, "temp_x": 312, "temp_y": 50, "font_size": 14, "color": "#e2e8f0", "stroke_width": 1},
+            "digital_clock": {"enabled": True, "layout": "horizontal", "x": 263, "y": 306, "font_size": 42, "color": "#ffffff", "color2": "#fde047", "stroke_width": 2, "stroke_color": "#080a14", "glow_radius": 1, "spacing": 2, "show_colon": True, "show_seconds": True, "seconds_size": 18, "seconds_color": "#38bdf8", "show_ampm": False},
+            "telemetry": {"enabled": True, "show_icons": False, "font_size": 17, "color": "#f8fafc", "stroke_width": 1, "align": 0, "steps": {"enabled": True, "x": 150, "y": 396, "align": 0}, "heart_rate": {"enabled": True, "x": 266, "y": 396, "align": 0}, "battery_pct": {"enabled": True, "x": 354, "y": 344, "align": 0}},
+            "bluetooth": {"enabled": True, "style": "dot_ring", "connected_color": "#38bdf8", "disconnected_color": "#ef4444", "size": 16, "x": 233, "y": 440},
+            "analog_hands": {"enabled": False}, "bezel": {"enabled": False},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "rpg_boss_battle.bin")
+            watchface_compiler.compile_config_to_bin(cfg, out)
+            with open(out, "rb") as f:
+                raw = f.read()
+            info = watchface_compiler.inspect_watchface_bin(raw)
+            self.assertTrue(info["valid"], info.get("errors"))
+            self.assertTrue(info["within_flash_budget"])
+            self.assertTrue(info["has_anim_header"])
+            for op in ("01 1a", "01 2e", "01 12", "01 1b", "01 1c", "01 02", "01 18", "01 07", "01 06", "01 15", "01 14"):
+                self.assertIn(op, info["opcodes"])
+            self.assertLessEqual(len(raw), watchface_compiler.MAX_WATCH_BIN_BYTES)
+
+    def test_builtin_xray_caseback_template_compiles_under_budget(self):
+        xdir = os.path.join(REPO_ROOT, "studio", "assets", "xray_caseback")
+        layer_files = ["layer_01_dress.png", "layer_02_skeleton.png", "layer_03_blueprint.png", "layer_04_thermal.png"]
+        frames = []
+        for fn in layer_files:
+            fp = os.path.join(xdir, fn)
+            self.assertTrue(os.path.isfile(fp), f"Missing {fp}")
+            frames.append({"label": fn, "image_path": fp})
+        tourb_fp = os.path.join(xdir, "tourbillon_wheel.webp")
+        self.assertTrue(os.path.isfile(tourb_fp), f"Missing {tourb_fp}")
+
+        # Verify subdial_arc produces 11 frames at requested compact size
+        _gx, _gy, a_frames = watchface_compiler.build_battery_widget({
+            "metric": "battery", "style": "subdial_arc", "color": "#f59e0b",
+            "thickness": 5, "size": 80, "start_angle": 125, "end_angle": 235, "x": 122, "y": 233,
+        })
+        self.assertEqual(len(a_frames), 11)
+        self.assertEqual(a_frames[0].size, (80, 80))
+
+        cfg = {
+            "layer_order": ["background", "tap_switch", "anim:an_tourbillon", "gauge:g_reserve", "weekday", "date", "telemetry", "hands"],
+            "background": {"mode": "solid", "color": "#080a10", "color2": "#080a10", "brightness": 100, "vignette": 0},
+            "tap_switch": {"enabled": True, "mode": "custom_images", "size": 466, "circular": True, "opacity": 100, "brightness": 100, "x": 233, "y": 233, "frames": frames},
+            "anim_sprites": [{"id": "an_tourbillon", "name": "Spinning Tourbillon", "enabled": True, "image_path": tourb_fp, "frames": 8, "fps": 6, "size": 80, "circular": True, "brightness": 100, "x": 233, "y": 326}],
+            "gauges": [{"id": "g_reserve", "enabled": True, "kind": "progress", "metric": "battery", "style": "subdial_arc", "color": "#f59e0b", "track_color": "#26303d", "thickness": 5, "size": 80, "start_angle": 125, "end_angle": 235, "x": 122, "y": 233}],
+            "weekday": {"enabled": True, "x": 233, "y": 128, "font_size": 17, "color": "#cbd5e1", "stroke_width": 1, "uppercase": True},
+            "date": {"enabled": True, "format": "DD", "show_year": False, "x": 348, "y": 233, "font_size": 21, "color": "#f8fafc", "stroke_width": 1},
+            "telemetry": {"enabled": True, "show_icons": False, "font_size": 16, "color": "#e2e8f0", "stroke_width": 1, "align": 2, "heart_rate": {"enabled": True, "x": 132, "y": 219, "align": 2}},
+            "analog_hands": {"enabled": True, "style": "dauphine", "color": "#f59e0b", "accent_color": "#f1f5f9", "show_seconds": True, "center_cap": True},
+            "digital_clock": {"enabled": False}, "bezel": {"enabled": False}, "weather": {"enabled": False}, "bluetooth": {"enabled": False},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "xray_caseback.bin")
+            watchface_compiler.compile_config_to_bin(cfg, out)
+            with open(out, "rb") as f:
+                raw = f.read()
+            info = watchface_compiler.inspect_watchface_bin(raw)
+            self.assertTrue(info["valid"], info.get("errors"))
+            self.assertTrue(info["within_flash_budget"])
+            self.assertTrue(info["has_anim_header"])
+            for op in ("01 1a", "01 2e", "01 12", "01 0a", "01 04", "01 0d", "01 06"):
+                self.assertIn(op, info["opcodes"])
+            self.assertLessEqual(len(raw), watchface_compiler.MAX_WATCH_BIN_BYTES)
+
     def test_amazfit_huami_bitmap_unpacker(self):
         # Build a synthetic Huami BM\xff\xff 64x64 32-bit BGRA bitmap inside a payload
         w, h = 64, 64

@@ -7,7 +7,7 @@
 
 An all-in-one, **point-and-click Watchface Studio** and **Haylou Fun companion app patcher** for the **Haylou Watch 4S** (`LS26` · `466×466` Round AMOLED).
 
-- **Design custom watchfaces in your browser** — photos without a forced clock, custom fonts, analog hands, live weather/steps/HR/battery gauges, animated GIFs, tap-to-switch multi-scene dials (Ben 10 Omnitrix, Fallout Pip-Boy 3000), or imported Amazfit `.bin` dials.
+- **Design custom watchfaces in your browser** — photos without a forced clock, custom fonts, analog hands, live weather/steps/HR/battery gauges, animated GIFs, tap-to-switch multi-scene dials (Ben 10 Omnitrix, Fallout Pip-Boy 3000, 16-Bit RPG Boss Battle, X-Ray Caseback Peeler), or imported Amazfit `.bin` dials.
 - **Unlock & fix the Haylou Fun Android app** — enables hidden Watch 4S health cards, fixes cycling phantom steps & missing speed/HR charts, fixes Health Connect sleep sync crashes, adds night-only wrist-wake off, and rings your watch for WhatsApp/Messenger/Telegram/Discord/Instagram/Viber calls with working wrist reject.
 - **100% safe & reversible** — never flashes watch firmware or bootloaders. Everything installs through the watch's official cloud watchface slot, and switching faces on the watch restores stock dials instantly.
 - **No Java or Android Studio required** — runs purely on Python.
@@ -104,7 +104,7 @@ You only need to do this once so Haylou Fun accepts your custom watchfaces and i
 
 1. Plug your phone into your PC over USB (keep the screen unlocked).
 2. In Watch 4S Studio (**Designer** tab), either:
-   - Pick one of the **12 built-in templates** in the left sidebar (like **Alien Force · 5 Holograms**, **Pip-Boy 3000 · 4 Themes**, **Tactical Weather HUD**, **Diver Chronograph**, **Fitness HUD**, or **Pure Photo (No Clock)**), **or**
+   - Pick one of the **14 built-in templates** in the left sidebar (like **Alien Force · 5 Holograms**, **Pip-Boy 3000 · 4 Themes**, **16-Bit RPG Boss Battle**, **X-Ray Caseback Peeler**, **Tactical Weather HUD**, **Diver Chronograph**, **Fitness HUD**, or **Pure Photo (No Clock)**), **or**
    - Upload your own photo, GIF, custom `.ttf`/`.otf` font, or even an Amazfit `.bin` watchface, and drag elements directly on the round preview.
 3. Click **`Save & Push`** (or open the **Gallery** tab and click **`Push to Watch`**). Studio compiles your `.bin` file, checks that it fits safely inside the watch's `960 KB` limit, and copies it straight to your phone.
 4. Now pick up your phone and open **Haylou Fun** (with your Watch 4S connected):
@@ -119,7 +119,7 @@ You only need to do this once so Haylou Fun accepts your custom watchfaces and i
 | Category | What You Can Do |
 | :--- | :--- |
 | **Live Round Editor** | Pixel-exact `466×466` AMOLED preview, drag-and-drop layers, snap-to-center guides, arrow-key nudging (`Shift` for 1px), full back-to-front layer ordering, and automatic `960 KB` flash-budget validation. |
-| **12 Built-In Templates** | Ready-to-use dials including **Alien Force · 5 Holograms** (green Omnitrix that automatically turns red below 50% battery with a color-matched ring + 5 tap-switch alien holograms + Silver Glass hands), **Pip-Boy 3000 · 4 Themes** (4 tap-switch CRT colorways with live gauges), **Tactical Weather HUD**, **Diver Chronograph**, **Fitness HUD**, **Stacked Neon**, **Pure Photo (No Clock)**, and 5 Omnitrix styles. |
+| **14 Built-In Templates** | Ready-to-use dials including **Alien Force · 5 Holograms** (green Omnitrix that automatically turns red below 50% battery with a color-matched ring + 5 tap-switch alien holograms + Silver Glass hands), **Pip-Boy 3000 · 4 Themes** (4 tap-switch CRT colorways with live gauges), **16-Bit RPG Boss Battle** (4 tap-switch pixel dungeon bosses with an inverted Boss HP bar that drains as you walk + animated knight + MP battery bar), **X-Ray Caseback Peeler** (tap to peel from Dark Titanium Dress → Open-Heart Mechanical Skeleton → CAD Blueprint → FLIR Thermal Scan with a live spinning tourbillon & power-reserve arc), **Tactical Weather HUD**, **Diver Chronograph**, **Fitness HUD**, **Stacked Neon**, **Pure Photo (No Clock)**, and 5 Omnitrix styles. |
 | **Tap-to-Switch (`01 1a`)** | Tap your watch screen to cycle through 2–8 backgrounds or themes (including a **Simulate Watch Tap** button right in Studio). |
 | **Animated GIF / WebP (`01 2e`)** | Full-screen animated loops or up to **3 floating GIF zones** at any layer depth, with automatic frame compression and duplicate-frame deduplication. |
 | **Analog Hands (`01 0a`)** | Smooth 60Hz Hour/Minute/Second hands — 8 built-in packs (**Omnitrix**, **Omnitrix Silver Glass**, **Stark Arc Reactor**, **Skeleton Dauphine**, **8-Bit Pixel**, **Classic**, **Neon**, **Minimalist**) plus **Custom PNG hand & center-cap uploads**. |
@@ -232,7 +232,9 @@ haylou-watch4s-watchface-maker/
 │   ├── index.html                     # Multi-layer dark-mode Watch 4S Studio & APK Patcher UI
 │   └── assets/
 │       ├── alien_force_holograms/     # Built-in Alien Force · 5 Holograms artwork
-│       └── pipboy_3000/               # Built-in Pip-Boy 3000 · 4 Themes artwork
+│       ├── pipboy_3000/               # Built-in Pip-Boy 3000 · 4 Themes artwork
+│       ├── rpg_boss_battle/           # Built-in 16-Bit RPG Boss Battle sprites & arenas
+│       └── xray_caseback/             # Built-in X-Ray Caseback Peeler layers & tourbillon
 ├── scripts/
 │   ├── watchface_compiler.py          # Unified multi-layer LS26 .bin compiler & preview engine
 │   ├── watchface_bin_maker.py         # Standalone digital / pure-image .bin CLI & RLE encoder

@@ -20,6 +20,7 @@
 ### Watch 4S Studio & LS26 `.bin` Compiler
 - Full hardware-verified LS26 opcode suite (`01 00`–`01 2e`): Z-order layer stack, Tap-to-Switch (`01 1a`), procedural bezels, multi-zone animated GIF/WebP (`01 2e`), 9-state Weather (`01 1b`) + Temperature (`01 1c`), Bluetooth badge (`01 14`), live Seconds (`01 18`), AM/PM (`01 11`), multi-gauge stacking (`01 12`) + native battery bar (`01 05`), and custom PNG stickers & hands.
 - Added built-in **Alien Force · 5 Holograms** template with unified `<50%` auto-red Omnitrix + color-matched battery ring (`01 12 sub=0x06`), 5 tap-switch holograms, and **Omnitrix Silver Glass** hands.
+- Added built-in **16-Bit RPG Boss Battle** template (4 tap-switch pixel dungeon bosses, inverted `pixel_bar` Boss HP gauge that drains with live Steps to `K.O.!`, animated `01 2e` Hero Knight, MP battery bar, weather & live telemetry) and **X-Ray Caseback Peeler** template (4 pixel-aligned tap-switch cutaway layers — Dress, Mechanical Skeleton, CAD Blueprint, FLIR Thermal — with a live spinning `01 2e` tourbillon, `subdial_arc` power reserve, and 60Hz Skeleton Dauphine hands).
 - Added RLE blob deduplication, `960 KB` flash-budget validation, exclusive Windows port binding (`SO_EXCLUSIVEADDRUSE`), and ADB cold-start timeout fixes.
 - Refreshed README, screenshots, and full technical documentation (`docs/apk_patcher_guide.md`, `docs/hardware_architecture.md`, `docs/haylou_watch4s_customizer_guide.md`).
 
