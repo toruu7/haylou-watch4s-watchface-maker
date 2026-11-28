@@ -57,8 +57,14 @@ Adds a 3rd **Resting Heart Rate** card alongside Heart Rate Range and Average He
 ### 4. `--vitality-vo2` (Vitality Score / PAI + VO2 Max Engine)
 Adds on-device calculation engines in `classes6.dex` that compute daily PAI (Personal Activity Intelligence) and VO2 Max from Watch 4S heart rate records — backfilling up to 30 days on Home launch and updating live on every BLE HR sync.
 
-### 5. `--workout-analytics` (Training Effect, EPOC & Recovery)
-Computes **Aerobic & Anaerobic Training Effect (`0.2–5.0`)**, **Exercise Load / EPOC**, **Recovery Time (minutes)**, and **Per-Workout VO2 Max** from Watch 4S workout HR arrays before cloud upload, plus a 30-day backfill for historical workouts in `SportDetailActivity`.
+### 5. `--workout-analytics` (Training Effect, EPOC, HR Stats & Cycling Speed Chart)
+Computes the workout metrics Watch 4S leaves blank in `SportDetailActivity` (runs live before Haylou Cloud upload + 30-day backfill on Home launch):
+- **HR Summary Stats**: Populates missing `SportTable.avrHeartRate`, `maxHeartRate`, and `minHeartRate` directly from the workout's `heartrate[]` samples (45–225 bpm).
+- **Cycling GPS Speed Stream (`speedArray` / `speedList`)**: Computes smoothed 10-second moving GPS speed samples in native `(int)(km/h * 100)` units (spike-rejected `> 90 km/h`, skipping `> 30s` stop gaps) from `SportTable.points`, unlocking Haylou Fun's native **Speed Line Chart** & **Fastest Speed** metric and supplying `speedList` to Haylou Cloud.
+- **Training Analytics**: Computes **Aerobic & Anaerobic Training Effect (`0.2–5.0`)**, **Exercise Load / EPOC**, **Recovery Time (minutes)**, and **Per-Workout VO2 Max**.
+
+### 5b. Health Connect Sleep Zero-Duration Stage Fix *(always applied on `classes6.dex`)*
+Patches `HealthConnectManager$insertSleep$1.invokeSuspend` in-place to skip zero-duration or clamped-overflow sleep stages (`stageEnd <= stageStart`) before constructing `SleepSessionRecord$Stage`, preventing `IllegalArgumentException: startTime must be before endTime` when Watch 4S emits a 0-minute stage.
 
 ### 6. `--hrv-active` (Stress-Derived HRV & Standing Hours)
 - **HRV Engine**: Derives 30-minute HRV values (`HrvTable`) from Watch 4S's 24/7 PPG Stress and quiet HR readings.

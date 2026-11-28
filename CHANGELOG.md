@@ -8,7 +8,8 @@
   - `--unlock-cards`: Unlocks PAI/Vitality, VO2 Max, HRV, Active/Standing Hours, High/Low HR Alert (`0x87 02`), and Daytime Sleep Naps (`0xBC 01`), while keeping unsupported Quick Reply getters at stock.
   - `--rhr`: Adds a 3rd Resting Heart Rate card to Heart Rate Details (Day, Week, Month & Year tabs).
   - `--vitality-vo2`: On-device Vitality Score (PAI) and VO2 Max engines (30-day backfill + live sync).
-  - `--workout-analytics`: Aerobic/Anaerobic Training Effect (`0.2–5.0`), Exercise Load (EPOC), Recovery Time, and per-workout VO2 Max.
+  - `--workout-analytics`: Aerobic/Anaerobic Training Effect (`0.2–5.0`), Exercise Load (EPOC), Recovery Time, per-workout VO2 Max, missing workout Avg/Max/Min HR stats from `heartrate[]`, and 10-second moving GPS cycling speed streams (`SportTable.speedArray` / `SportNetBean.speedList`) unlocking Haylou Fun's Speed Line Chart & Fastest Speed.
+  - Health Connect Sleep sync fix (`patch_classes6_hc_sleep_fix`): guards `HealthConnectManager$insertSleep$1` against Watch 4S zero-duration sleep stages (`startTime must be before endTime`).
   - `--hrv-active`: Stress-derived 30-min HRV (`HrvTable`) and Hourly Active/Standing Hours (`StepDataTable.activeItems[24]`).
   - `--hourly-charts`: Unlocks Watch 4S BLE `0x59` 30-min hardware step histograms and Hourly Steps/Calories/Exercise Day (`D`) tabs.
   - `--night-raise-to-wake`: Wires Device Settings → DND schedule exclusively to BLE `0x72` Raise-to-Wake (`23:00–07:00` default off) while keeping calls & notifications active.

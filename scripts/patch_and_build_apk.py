@@ -35,8 +35,11 @@ Modular patch flags (default: --all):
                   answered/missed, and executes the VoIP app's Decline action on watch Reject.
   --workout-analytics
                   classes6.dex: Compute Aerobic & Anaerobic Training Effect (0.2-5.0),
-                  Exercise Load / EPOC, Recovery Time (minutes), and Per-Workout VO2 Max
-                  from Watch 4S workout HR arrays (live before Cloud upload + 30-day backfill).
+                  Exercise Load / EPOC, Recovery Time (minutes), Per-Workout VO2 Max,
+                  missing workout HR stats (avr/max/min from heartrate[]), and 10-second
+                  moving GPS speed streams (SportTable.speedArray / SportNetBean.speedList)
+                  for cycling rides (live before Cloud upload + 30-day backfill); also fixes
+                  Health Connect Sleep sync crashes on Watch 4S zero-duration sleep stages.
   --hrv-active    classes6/7.dex: Stress-derived 30-min HRV engine (HrvTable from Watch 4S's
                   24/7 PPG Stress + quiet HR) and Hourly Active/Standing Hours engine
                   (StepDataTable.activeItems[24], 30-day backfill + live refresh).
@@ -505,6 +508,101 @@ def patch_classes6_sideload(dex_bytes: bytes, mode: str = "sideload") -> bytes:
     data[space_off : space_off + 86] = target_space
     out = recompute_dex_checksums(data)
     print(f"[+] classes6.dex watchface patch applied (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
+    return out
+
+
+def patch_classes6_hc_sleep_fix(dex_bytes: bytes) -> bytes:
+    """
+    Fix HealthConnectManager$insertSleep$1.invokeSuspend(Object)Object crash on Watch 4S
+    zero-duration (or clamped-overflow) sleep stages:
+      java.lang.IllegalArgumentException: startTime must be before endTime.
+
+    Watch 4S firmware occasionally emits a 0-minute stage (e.g. startTime=118, endTime=118,
+    totalTime=0) which stock Haylou Fun passes directly to SleepSessionRecord$Stage.<init>.
+    In-place patch at +0x011e..+0x0136 (exact 25-word / 50-byte replacement): drops two
+    redundant Kotlin Intrinsics.g(toInstant(), ...) null checks (6 words) and inserts
+    `if (v14.compareTo(v5) <= 0) continue;` before Stage creation without shifting any
+    branch target in the method.
+    """
+    print("[*] Patching classes6.dex (Health Connect Sleep zero-duration stage guard)...")
+    d6 = DexFile(dex_bytes)
+    buf = bytearray(dex_bytes)
+
+    m_hc = d6.find_method_info(
+        "Lcom/liesheng/haylou/manager/HealthConnectManager$insertSleep$1;",
+        "Lcom/liesheng/haylou/manager/HealthConnectManager$insertSleep$1;->invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
+        allow_tries=True,
+    )
+    m_czdt_cmp = d6.find_idx(
+        "method",
+        "Ljava/time/chrono/ChronoZonedDateTime;->compareTo(Ljava/time/chrono/ChronoZonedDateTime;)I",
+    )
+    m_czdt_to_inst = d6.find_idx(
+        "method",
+        "Ljava/time/chrono/ChronoZonedDateTime;->toInstant()Ljava/time/Instant;",
+    )
+    m_intrinsics_g = d6.find_idx(
+        "method",
+        "Lkotlin/jvm/internal/n;->g(Ljava/lang/Object;Ljava/lang/String;)V",
+    )
+    t_stage = d6.find_idx(
+        "type",
+        "Landroidx/health/connect/client/records/SleepSessionRecord$Stage;",
+    )
+    m_stage_init = d6.find_idx(
+        "method",
+        "Landroidx/health/connect/client/records/SleepSessionRecord$Stage;-><init>(Ljava/time/Instant;Ljava/time/Instant;I)V",
+    )
+    m_al_add = d6.find_idx("method", "Ljava/util/ArrayList;->add(Ljava/lang/Object;)Z")
+
+    off = m_hc["code_off"] + 16 + 0x011E * 2
+    cur = bytes(buf[off : off + 50])
+
+    # Unchanged 11-word tail (+0x012c..+0x0136): new Stage, <init>, ArrayList.add, v5=v14, v3=1, goto 00ed
+    tail_expected = struct.pack(
+        "<11H",
+        0x0F22, t_stage,          # +012c: new-instance v15, SleepSessionRecord$Stage
+        0x4070, m_stage_init, 0x385F,  # +012e: invoke-direct {v15, v5, v8, v3}, Stage.<init>
+        0x206E, m_al_add, 0x00F7,      # +0131: invoke-virtual {v7, v15}, ArrayList.add
+        0xE507,                   # +0134: move-object v5, v14
+        0x1312,                   # +0135: const/4 v3, 1
+        0xB728,                   # +0136: goto 00ed (-0x49)
+    )
+    orig_head = struct.pack(
+        "<14H",
+        0x1072, m_czdt_to_inst, 0x0005,  # +011e: v5.toInstant()
+        0x050C,                          # +0121: move-result-object v5
+        0x2071, m_intrinsics_g, 0x0065,  # +0122: Intrinsics.g(v5, v6)
+        0x1072, m_czdt_to_inst, 0x000E,  # +0125: v14.toInstant()
+        0x080C,                          # +0128: move-result-object v8
+        0x2071, m_intrinsics_g, 0x0068,  # +0129: Intrinsics.g(v8, v6)
+    )
+    patched_head = struct.pack(
+        "<14H",
+        0x2072, m_czdt_cmp, 0x005E,      # +011e: invoke-interface {v14, v5}, ChronoZonedDateTime.compareTo
+        0x0F0A,                          # +0121: move-result v15
+        0x0F3D, 0x0013,                  # +0122: if-lez v15, +0x13 (-> +0135: reset v3=1 & loop)
+        0x1072, m_czdt_to_inst, 0x0005,  # +0124: invoke-interface {v5}, ChronoZonedDateTime.toInstant
+        0x050C,                          # +0127: move-result-object v5
+        0x1072, m_czdt_to_inst, 0x000E,  # +0128: invoke-interface {v14}, ChronoZonedDateTime.toInstant
+        0x080C,                          # +012b: move-result-object v8
+    )
+
+    orig_slice = orig_head + tail_expected
+    patched_slice = patched_head + tail_expected
+    assert len(orig_slice) == 50 and len(patched_slice) == 50
+
+    if cur == patched_slice:
+        print("    [skip] Health Connect sleep stage guard already patched.")
+        return bytes(buf)
+    if cur != orig_slice:
+        raise RuntimeError(
+            f"Unexpected bytes at HealthConnectManager$insertSleep$1+0x011e: {cur.hex()}"
+        )
+
+    buf[off : off + 50] = patched_slice
+    out = recompute_dex_checksums(buf)
+    print(f"[+] classes6.dex Health Connect sleep fix patched (Adler: {struct.unpack_from('<I', out, 8)[0]:08x})")
     return out
 
 
@@ -3580,17 +3678,49 @@ def patch_classes6_voip_calls(dex_bytes: bytes) -> bytes:
 def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
     """
     Build Lcom/liesheng/haylou/ui/device/data/ClockReminderHelperKt;->parseReminderCode(I)Ljava/lang/String;
-    (swapped into TestBleEventActivity.onClickView(View)V, 1760 words, regs=31, ins=1, outs=6, p0=v30).
+    (swapped into TestBleEventActivity.onClickView(View)V, 1760 words, regs=39, ins=1, outs=9, p0=v38).
 
     Walks the last 30 days of ALL workouts (idempotently, and runs live inside CommonUtil.z
-    before Haylou Cloud upload) and populates the 4 native SportDetailActivity panels that
-    Watch 4S leaves blank:
-      1) Aerobic & Anaerobic Training Effect (0.2-5.0) -> SportTable.effectInfo ("X.Y_A.B")
-      2) Exercise Load / EPOC (5-450)                  -> SportTable.sportsLoad ("<int>")
-      3) Recovery Time (minutes, 2h-72h)               -> SportTable.recoveryTime (recHours*60)
-      4) Per-Workout VO2 Max (mL/kg/min)               -> SportTable.maxMet (<int>)
+    before Haylou Cloud upload) and populates the fields Watch 4S leaves blank:
+      Stage A) Missing HR summary stats (avrHeartRate, maxHeartRate, minHeartRate) from heartrate[]
+      Stage B) Cycling 10-second moving GPS speed stream (SportTable.speedArray = SportNetBean.speedList,
+               native (int)(kmh * 100) units) from SportTable.points, unlocking Haylou Fun's Speed
+               Line Chart + Max Speed card and supplying speedList to Haylou Cloud
+      Stage C) The 4 native SportDetailActivity analytics panels:
+        1) Aerobic & Anaerobic Training Effect (0.2-5.0) -> SportTable.effectInfo ("X.Y_A.B")
+        2) Exercise Load / EPOC (5-450)                  -> SportTable.sportsLoad ("<int>")
+        3) Recovery Time (minutes, 2h-72h)               -> SportTable.recoveryTime (recHours*60)
+        4) Per-Workout VO2 Max (mL/kg/min)               -> SportTable.maxMet (<int>)
     """
     a = DalvikAssembler()
+
+    def _emit_speed_sample(pfx: str) -> None:
+        # Emit (int)(winDist * 360000.0f / winMs + 0.5f) clamped [0..9000] into buf[cnt++]
+        # Precondition: v31:v32 = winMs (>0), v33 = winDist (>=0.0f), v34 = cnt, v35 = bufLen, v36 = int[] buf
+        a.move(0, 34)
+        a.move(1, 35)
+        a.if_ge(0, 1, f"wa_sp_{pfx}_rst")
+        a.move(2, 33)
+        a.const_float(3, 360000.0)
+        a.mul_float_2addr(2, 3)
+        a.move_wide(4, 31)
+        a.long_to_float(3, 4)
+        a.div_float_2addr(2, 3)
+        a.const_float(3, 0.5)
+        a.add_float_2addr(2, 3)
+        a.float_to_int(2, 2)
+        a.if_gez(2, f"wa_sp_{pfx}_hi")
+        a.const4(2, 0)
+        a.label(f"wa_sp_{pfx}_hi")
+        a.const16(3, 9000)
+        a.if_le(2, 3, f"wa_sp_{pfx}_put")
+        a.move(2, 3)
+        a.label(f"wa_sp_{pfx}_put")
+        a.aput(2, 36, 0)
+        a.add_int_lit8(34, 34, 1)
+        a.label(f"wa_sp_{pfx}_rst")
+        a.const_float(33, 0.0)
+        a.const_wide16(31, 0)
 
     # Load AppDatabase (v29), SportDao (v28), HeartRateDataDao (v27)
     a.sget_object(0, refs["F_APPDB_A"])
@@ -3676,7 +3806,9 @@ def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
 
     a.move_wide(0, 20)
     a.invoke_static([0, 1], refs["M_CHINA_TO_LOCAL"])
-    a.move_result_wide(18)  # v18,v19 = localMidMs
+    a.move_result_wide(0)
+    a.invoke_static([0, 1], refs["M_UTC_TO_LOCAL"])
+    a.move_result_wide(18)  # v18,v19 = true localMidMs
 
     a.move_object(0, 28)
     a.move_wide(1, 18)
@@ -3723,14 +3855,213 @@ def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
     a.invoke_interface([0, 15], refs["M_LIST_GET"])
     a.move_result_object(14)
     a.check_cast(14, refs["T_SPORT_TABLE"])
+    a.const16(37, 0)  # v37 = dirty flag for Stages A/B
 
+    # ---- Stage A: Populate missing avrHeartRate / maxHeartRate / minHeartRate from heartrate[] ----
+    a.invoke_virtual([14], refs["M_SPORT_GET_AVGHR"])
+    a.move_result(0)
+    a.invoke_virtual([14], refs["M_SPORT_GET_MAXHR"])
+    a.move_result(1)
+    a.invoke_virtual([14], refs["M_SPORT_GET_MINHR"])
+    a.move_result(2)
+    a.if_lez(0, "wa_hrstat_scan")
+    a.if_lez(1, "wa_hrstat_scan")
+    a.if_gtz(2, "wa_speed_stage")
+
+    a.label("wa_hrstat_scan")
+    a.invoke_virtual([14], refs["M_SPORT_GET_HRARR"])
+    a.move_result_object(8)
+    a.if_eqz(8, "wa_speed_stage")
+    a.array_length(5, 8)
+    a.if_lez(5, "wa_speed_stage")
+
+    # v6=sum, v7=cnt, v9=maxHr, v10=minHr(999), v4=i
+    a.const4(6, 0)
+    a.const4(7, 0)
+    a.const4(9, 0)
+    a.const16(10, 999)
+    a.const4(4, 0)
+
+    a.label("wa_hrs_loop")
+    a.if_ge(4, 5, "wa_hrs_done")
+    a.aget(3, 8, 4)
+    a.const16(11, 45)
+    a.if_lt(3, 11, "wa_hrs_next")
+    a.const16(11, 225)
+    a.if_gt(3, 11, "wa_hrs_next")
+    a.add_int_2addr(6, 3)
+    a.add_int_lit8(7, 7, 1)
+    a.if_le(3, 9, "wa_hrs_min")
+    a.move(9, 3)
+    a.label("wa_hrs_min")
+    a.if_ge(3, 10, "wa_hrs_next")
+    a.move(10, 3)
+    a.label("wa_hrs_next")
+    a.add_int_lit8(4, 4, 1)
+    a.goto16("wa_hrs_loop")
+
+    a.label("wa_hrs_done")
+    a.if_lez(7, "wa_speed_stage")
+    a.div_int_lit8(11, 7, 2)
+    a.add_int_2addr(6, 11)
+    a.div_int_2addr(6, 7)  # v6 = rounded avgHr
+    a.if_gtz(0, "wa_hrs_setmax")
+    a.invoke_virtual([14, 6], refs["M_SPORT_SET_AVGHR"])
+    a.const16(37, 1)
+    a.label("wa_hrs_setmax")
+    a.if_gtz(1, "wa_hrs_setmin")
+    a.invoke_virtual([14, 9], refs["M_SPORT_SET_MAXHR"])
+    a.const16(37, 1)
+    a.label("wa_hrs_setmin")
+    a.if_gtz(2, "wa_speed_stage")
+    a.invoke_virtual([14, 10], refs["M_SPORT_SET_MINHR"])
+    a.const16(37, 1)
+
+    # ---- Stage B: Populate missing cycling speedArray ((int)(kmh * 100)) from 10s GPS windows ----
+    a.label("wa_speed_stage")
+    a.invoke_virtual([14], refs["M_SPORT_GET_TYPE"])
+    a.move_result(1)
+    a.sget_object(0, refs["F_STM_INST"])
+    a.invoke_virtual([0, 1], refs["M_STM_MAIN_TYPE"])
+    a.move_result(0)
+    a.const4(1, 2)
+    a.if_ne(0, 1, "wa_analytics_stage")
+
+    a.invoke_virtual([14], refs["M_SPORT_GET_SPEEDARR"])
+    a.move_result_object(0)
+    a.if_eqz(0, "wa_sp_need_spd")
+    a.array_length(0, 0)
+    a.if_gtz(0, "wa_analytics_stage")
+
+    a.label("wa_sp_need_spd")
+    a.invoke_virtual([14], refs["M_SPORT_GET_POINTS"])
+    a.move_result_object(0)
+    a.if_eqz(0, "wa_analytics_stage")
+    a.move_object(30, 0)
+    a.invoke_interface([0], refs["M_LIST_SIZE"])
+    a.move_result(12)  # v12 = ptsSize
+    a.const4(1, 5)
+    a.if_lt(12, 1, "wa_analytics_stage")
+
+    # Allocate temp int[min(ptsSize, 4000)] in v36 (v35 = bufLen) and float[3] in v8
+    a.move(0, 12)
+    a.const16(1, 4000)
+    a.if_le(0, 1, "wa_sp_bl_ok")
+    a.move(0, 1)
+    a.label("wa_sp_bl_ok")
+    a.move(35, 0)
+    a.new_array(1, 0, refs["T_INT_ARR"])
+    a.move_object(36, 1)
+    a.const4(0, 3)
+    a.new_array(8, 0, refs["T_FLOAT_ARR"])
+    a.const_wide16(31, 0)   # v31:v32 = winMs = 0L
+    a.const_float(33, 0.0)  # v33 = winDist = 0.0f
+    a.const16(34, 0)        # v34 = cnt = 0
+    a.const4(11, 1)         # v11 = ptIdx = 1
+
+    a.label("wa_sp_pt_loop")
+    a.if_ge(11, 12, "wa_sp_pt_done")
+    a.move_object(7, 30)
+    a.add_int_lit8(1, 11, -1)
+    a.invoke_interface([7, 1], refs["M_LIST_GET"])
+    a.move_result_object(0)
+    a.check_cast(0, refs["T_LATLNG"])  # v0 = pPrev
+    a.invoke_interface([7, 11], refs["M_LIST_GET"])
+    a.move_result_object(6)
+    a.check_cast(6, refs["T_LATLNG"])  # v6 = pCur
+
+    # dtMs = pCur.getTime() - pPrev.getTime()
+    a.invoke_virtual([0], refs["M_PT_TIME"])
+    a.move_result_wide(2)
+    a.invoke_virtual([6], refs["M_PT_TIME"])
+    a.move_result_wide(4)
+    a.sub_long_2addr(4, 2)
+    a.const_wide16(2, 0)
+    a.cmp_long(1, 4, 2)
+    a.if_gtz(1, "wa_sp_dt_pos")
+    a.const_wide16(4, 2000)
+    a.label("wa_sp_dt_pos")
+    # Skip > 30s stop/pause gaps (flush any pending >= 2s window first)
+    a.const_wide32(2, 30000)
+    a.cmp_long(1, 4, 2)
+    a.if_gtz(1, "wa_sp_gap")
+    a.move_wide(9, 4)  # v9:v10 = dtMs
+
+    # distanceBetween(lat1, lon1, lat2, lon2, float[3] v8)
+    a.invoke_virtual([6], refs["M_PT_LAT"])
+    a.move_result_wide(4)
+    a.invoke_virtual([6], refs["M_PT_LON"])
+    a.move_result_wide(6)
+    a.invoke_virtual([0], refs["M_PT_LON"])
+    a.move_result_wide(2)
+    a.invoke_virtual([0], refs["M_PT_LAT"])
+    a.move_result_wide(0)
+    a.invoke_static_range(0, 9, refs["M_LOC_DIST_BETWEEN"])
+
+    a.const4(1, 0)
+    a.aget(0, 8, 1)         # v0 = d (meters)
+    a.const4(3, 0)          # 0.0f
+    a.cmpl_float(3, 0, 3)
+    a.if_ltz(3, "wa_sp_pt_next")  # reject negative or NaN
+    a.long_to_float(1, 9)   # v1 = (float) dtMs
+    a.const_float(2, 0.025) # 25 m/s = 90 km/h spike guard
+    a.mul_float_2addr(2, 1)
+    a.cmpl_float(3, 0, 2)
+    a.if_gtz(3, "wa_sp_pt_next")
+
+    a.add_float(33, 33, 0)  # winDist += d
+    a.add_long(31, 31, 9)   # winMs += dtMs
+    a.const_wide16(2, 10000)
+    a.cmp_long(1, 31, 2)
+    a.if_ltz(1, "wa_sp_pt_next")
+    _emit_speed_sample("m")
+    a.goto16("wa_sp_pt_next")
+
+    a.label("wa_sp_gap")
+    a.const_wide16(2, 2000)
+    a.cmp_long(1, 31, 2)
+    a.if_ltz(1, "wa_sp_gap_rst")
+    _emit_speed_sample("g")
+    a.goto16("wa_sp_pt_next")
+    a.label("wa_sp_gap_rst")
+    a.const_float(33, 0.0)
+    a.const_wide16(31, 0)
+
+    a.label("wa_sp_pt_next")
+    a.add_int_lit8(11, 11, 1)
+    a.goto16("wa_sp_pt_loop")
+
+    a.label("wa_sp_pt_done")
+    a.const_wide16(2, 2000)
+    a.cmp_long(1, 31, 2)
+    a.if_ltz(1, "wa_sp_build_arr")
+    _emit_speed_sample("t")
+
+    a.label("wa_sp_build_arr")
+    a.move(0, 34)
+    a.const4(1, 3)
+    a.if_lt(0, 1, "wa_analytics_stage")
+    a.new_array(2, 0, refs["T_INT_ARR"])
+    a.const4(3, 0)
+    a.label("wa_sp_cp_loop")
+    a.if_ge(3, 0, "wa_sp_cp_done")
+    a.aget(4, 36, 3)
+    a.aput(4, 2, 3)
+    a.add_int_lit8(3, 3, 1)
+    a.goto16("wa_sp_cp_loop")
+    a.label("wa_sp_cp_done")
+    a.invoke_virtual([14, 2], refs["M_SPORT_SET_SPEEDARR"])
+    a.const16(37, 1)
+
+    # ---- Stage C: Workout Analytics (Training Effect, Exercise Load, Recovery Time, VO2 Max) ----
+    a.label("wa_analytics_stage")
     # Require duration >= 180s (3 min)
     a.invoke_virtual([14], refs["M_SPORT_GET_DUR"])
     a.move_result(11)
     a.const16(0, 180)
-    a.if_lt(11, 0, "wa_sp_next")
+    a.if_lt(11, 0, "wa_sp_maybe_save")
 
-    # Skip if already has effectInfo + recoveryTime + maxMet
+    # Skip analytics recompute if already has effectInfo + recoveryTime + maxMet
     a.invoke_virtual([14], refs["M_SPORT_GET_EFFECT"])
     a.move_result_object(0)
     a.if_eqz(0, "wa_compute")
@@ -3742,7 +4073,7 @@ def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
     a.if_lez(0, "wa_compute")
     a.invoke_virtual([14], refs["M_SPORT_GET_MAXMET"])
     a.move_result(0)
-    a.if_gtz(0, "wa_sp_next")
+    a.if_gtz(0, "wa_sp_maybe_save")
 
     # Compute effMaxHr (v12) = max(userMaxHr, sp.maxHeartRate, hrRest + 40)
     a.label("wa_compute")
@@ -3997,6 +4328,12 @@ def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
     a.label("wa_save_sp")
     a.move_object(0, 28)
     a.invoke_interface([0, 14], refs["M_SPORT_UPDATE"])
+    a.goto16("wa_sp_next")
+
+    a.label("wa_sp_maybe_save")
+    a.if_eqz(37, "wa_sp_next")
+    a.move_object(0, 28)
+    a.invoke_interface([0, 14], refs["M_SPORT_UPDATE"])
 
     a.label("wa_sp_next")
     a.add_int_lit8(15, 15, 1)
@@ -4014,10 +4351,11 @@ def _build_workout_analytics_insns(refs: dict, pad_words: int) -> bytes:
 
 def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
     """
-    Patch classes6.dex with Workout Analytics Engine (Aerobic/Anaerobic Training Effect,
-    Exercise Load / EPOC, Recovery Time, and Per-Workout VO2 Max for all Watch 4S workouts).
+    Patch classes6.dex with Workout Analytics Engine (HR summary stats, cycling 10s GPS
+    speedArray/speedList, Aerobic/Anaerobic Training Effect, Exercise Load / EPOC,
+    Recovery Time, and Per-Workout VO2 Max for all Watch 4S workouts).
     """
-    print("[*] Patching classes6.dex (Workout Analytics: Training Effect + Load + Recovery + VO2 Max)...")
+    print("[*] Patching classes6.dex (Workout Analytics: HR Stats + Speed Chart + TE/Load/Recovery/VO2)...")
     d6 = DexFile(dex_bytes)
     buf = bytearray(dex_bytes)
 
@@ -4025,8 +4363,12 @@ def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
         "T_SPORT_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/SportTable;"),
         "T_USER_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/UserInfoTable;"),
         "T_VO2_TABLE": d6.find_idx("type", "Lcom/liesheng/lib_room/table/Vo2MaxTable;"),
+        "T_LATLNG": d6.find_idx("type", "Lcom/liesheng/lib_room/table/LatlngPoint;"),
+        "T_INT_ARR": d6.find_idx("type", "[I"),
+        "T_FLOAT_ARR": d6.find_idx("type", "[F"),
         "T_SB": d6.find_idx("type", "Ljava/lang/StringBuilder;"),
         "F_APPDB_A": d6.find_idx("field", "Lcom/liesheng/AppDatabase;->a:Lcom/liesheng/AppDatabase$a;"),
+        "F_STM_INST": d6.find_idx("field", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->INSTANCE:Lcom/liesheng/hayloufun/sport/data/SportTypeManager;"),
         "M_APPDB_B": d6.find_idx("method", "Lcom/liesheng/AppDatabase$a;->b()Lcom/liesheng/AppDatabase;"),
         "M_APPDB_SPORT_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->u()Lcom/liesheng/lib_room/dao/SportDao;"),
         "M_APPDB_HR_DAO": d6.find_idx("method", "Lcom/liesheng/AppDatabase;->l()Lcom/liesheng/lib_room/dao/HeartRateDataDao;"),
@@ -4040,10 +4382,19 @@ def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
         "M_VO2_GET": d6.find_idx("method", "Lcom/liesheng/lib_room/table/Vo2MaxTable;->getMaxMet()I"),
         "M_USER_ALL": d6.find_idx("method", "Lcom/liesheng/lib_room/dao/UserInfoDao;->getAllUserInfo()Ljava/util/List;"),
         "M_USER_AGE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/UserInfoTable;->getAge()I"),
+        "M_STM_MAIN_TYPE": d6.find_idx("method", "Lcom/liesheng/hayloufun/sport/data/SportTypeManager;->getMainTypeByType(I)I"),
+        "M_SPORT_GET_TYPE": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getType()I"),
         "M_SPORT_GET_DUR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getDuration()I"),
         "M_SPORT_GET_HRARR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getHeartrate()[I"),
         "M_SPORT_GET_AVGHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getAvrHeartRate()I"),
+        "M_SPORT_SET_AVGHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setAvrHeartRate(I)V"),
         "M_SPORT_GET_MAXHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getMaxHeartRate()I"),
+        "M_SPORT_SET_MAXHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMaxHeartRate(I)V"),
+        "M_SPORT_GET_MINHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getMinHeartRate()I"),
+        "M_SPORT_SET_MINHR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMinHeartRate(I)V"),
+        "M_SPORT_GET_SPEEDARR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getSpeedArray()[I"),
+        "M_SPORT_SET_SPEEDARR": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setSpeedArray([I)V"),
+        "M_SPORT_GET_POINTS": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getPoints()Ljava/util/List;"),
         "M_SPORT_GET_EFFECT": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getEffectInfo()Ljava/lang/String;"),
         "M_SPORT_SET_EFFECT": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setEffectInfo(Ljava/lang/String;)V"),
         "M_SPORT_SET_LOAD": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setSportsLoad(Ljava/lang/String;)V"),
@@ -4051,6 +4402,10 @@ def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
         "M_SPORT_SET_REC": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setRecoveryTime(I)V"),
         "M_SPORT_GET_MAXMET": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->getMaxMet()I"),
         "M_SPORT_SET_MAXMET": d6.find_idx("method", "Lcom/liesheng/lib_room/table/SportTable;->setMaxMet(I)V"),
+        "M_PT_LAT": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getLatitude()D"),
+        "M_PT_LON": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getLongitude()D"),
+        "M_PT_TIME": d6.find_idx("method", "Lcom/liesheng/lib_room/table/LatlngPoint;->getTime()J"),
+        "M_LOC_DIST_BETWEEN": d6.find_idx("method", "Landroid/location/Location;->distanceBetween(DDDD[F)V"),
         "M_IDATA_Z": d6.find_idx("method", "Lcom/liesheng/haylou/db/datahelper/IDataHelper;->z(J)Ljava/util/Date;"),
         "M_CHINA_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->b(J)J"),
         "M_UTC_TO_LOCAL": d6.find_idx("method", "Lcom/liesheng/lib_common/ktx/c;->g(J)J"),
@@ -4080,12 +4435,12 @@ def patch_classes6_workout_analytics(dex_bytes: bytes) -> bytes:
     )
     if m_wa["insns_size"] >= 1000:
         insns = _build_workout_analytics_insns(refs, pad_words=m_wa["insns_size"])
-        struct.pack_into("<4H2I", buf, m_wa["code_off"], 31, 1, 6, 0, 0, m_wa["insns_size"])
+        struct.pack_into("<4H2I", buf, m_wa["code_off"], 39, 1, 9, 0, 0, m_wa["insns_size"])
         buf[m_wa["code_off"] + 16 : m_wa["code_off"] + 16 + len(insns)] = insns
     else:
         assert m_wa["code_pos_len"] == 4 and m_host["code_pos_len"] == 4
         insns = _build_workout_analytics_insns(refs, pad_words=m_host["insns_size"])
-        struct.pack_into("<4H2I", buf, m_host["code_off"], 31, 1, 6, 0, 0, m_host["insns_size"])
+        struct.pack_into("<4H2I", buf, m_host["code_off"], 39, 1, 9, 0, 0, m_host["insns_size"])
         buf[m_host["code_off"] + 16 : m_host["code_off"] + 16 + len(insns)] = insns
         stub = DalvikAssembler()
         stub.return_void()
@@ -6352,6 +6707,7 @@ def build_modded_apk(
                 c6 = patch_classes6_hrv_active(c6)
             if voip_calls:
                 c6 = patch_classes6_voip_calls(c6)
+            c6 = patch_classes6_hc_sleep_fix(c6)
             replacements["classes6.dex"] = c6
 
         if unlock_cards or rhr or night_raise_to_wake or hrv_active or hourly_charts:
