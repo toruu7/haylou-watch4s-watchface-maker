@@ -23,6 +23,7 @@ for p in (SCRIPTS_DIR, STUDIO_DIR):
 import amazfit_unpacker
 import apk_signer
 import dex_patcher_lib
+import jieli_fw_unpacker
 import server as studio_server
 import watchface_bin_maker
 import watchface_compiler
@@ -278,6 +279,38 @@ class TestStudioSecurity(unittest.TestCase):
         self.assertFalse(studio_server.host_allowed({"Host": "evil.example:8466"}))
         self.assertTrue(studio_server.origin_allowed({"Origin": f"http://127.0.0.1:{studio_server.PORT}"}))
         self.assertFalse(studio_server.origin_allowed({"Origin": "https://evil.example"}))
+
+
+class TestJieliFirmwareUnpacker(unittest.TestCase):
+    def test_lfsr_and_sfc_xor_roundtrip_across_0x400_boundary(self):
+        # Verify 32-byte block SFC XOR encryption/decryption across the 0x400 bit-flip boundary
+        plain = bytes((i * 37 + 11) & 0xFF for i in range(1500))
+        enc = jieli_fw_unpacker.sfc_xor_decrypt(plain, 0x0120, sfc_key=0x1607)
+        self.assertNotEqual(enc, plain)
+        dec = jieli_fw_unpacker.sfc_xor_decrypt(enc, 0x0120, sfc_key=0x1607)
+        self.assertEqual(dec, plain)
+        self.assertEqual(jieli_fw_unpacker.jl_crc16(dec), jieli_fw_unpacker.jl_crc16(plain))
+
+    def test_jlfs_entry_parse_and_att_db_parser(self):
+        # Build a valid synthetic 32-byte JLFS directory entry encrypted with 0x1607
+        payload = struct.pack("<HIIBBH", 0xA19F, 0x0120, 0x1000, 0x82, 0xFF, 0) + b"app.bin\x00" + b"\xff" * 8
+        entry_plain = struct.pack("<H", jieli_fw_unpacker.jl_crc16(payload)) + payload
+        entry_enc = jieli_fw_unpacker.jl_enc_stream(entry_plain, 0x1607)
+        parsed = jieli_fw_unpacker.parse_jlfs_entry(entry_enc, 0x1607)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["name"], "app.bin")
+        self.assertEqual(parsed["data_crc"], 0xA19F)
+
+        # Build a minimal BTstack ATT DB (GAP 0x1800 + MoYoung 0xFEEA + terminator)
+        att_blob = (
+            struct.pack("<HHHHH", 10, 0x0002, 0x0001, 0x2800, 0x1800)
+            + struct.pack("<HHHHH", 10, 0x0002, 0x001B, 0x2800, 0xFEEA)
+            + b"\x00\x00"
+        )
+        rows = jieli_fw_unpacker.parse_att_db(att_blob)
+        self.assertEqual(len(rows), 2)
+        self.assertIn("0x1800", rows[0]["detail"])
+        self.assertIn("0xFEEA", rows[1]["detail"])
 
 
 if __name__ == "__main__":

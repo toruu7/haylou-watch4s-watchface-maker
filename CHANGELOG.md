@@ -23,6 +23,7 @@
 - Added built-in **16-Bit RPG Boss Battle** template (4 tap-switch pixel dungeon bosses, inverted `pixel_bar` Boss HP gauge that drains with live Steps to `K.O.!`, animated `01 2e` Hero Knight, MP battery bar, weather & live telemetry) and **X-Ray Caseback Peeler** template (4 pixel-aligned tap-switch cutaway layers — Dress, Mechanical Skeleton, CAD Blueprint, FLIR Thermal — with a live spinning `01 2e` tourbillon, `subdial_arc` power reserve, and 60Hz Skeleton Dauphine hands).
 - Added RLE blob deduplication, `960 KB` flash-budget validation, exclusive Windows port binding (`SO_EXCLUSIVEADDRUSE`), and ADB cold-start timeout fixes.
 - Refreshed README, screenshots, and full technical documentation (`docs/apk_patcher_guide.md`, `docs/hardware_architecture.md`, `docs/haylou_watch4s_customizer_guide.md`).
+- Added Watch 4S (`JL7012A7`) OTA firmware reverse engineering toolkit & teardown (`scripts/jieli_fw_unpacker.py`, `docs/firmware_teardown.md`): pure-Python JieLi `.ufw` / `JLFS` / 32-byte SFC XOR (`0x1607`) decrypter with CRC16 verification, verified silicon BOM (`VC30FS`, `ICOE CC1165W`, `CHSC6x`, `AW320xx`, on-watch GoMore), 16 MB flash partition table, 40-thread RTOS table, complete BLE GATT ATT database (`0x180D` HR, `0x180F` Battery, `0xFEEA` MoYoung, `0xFEE7` WeChat Sports), and `FE EA` BLE command map.
 
 ## 1.1.0
 

@@ -213,6 +213,7 @@ On Windows, you can also drag & drop any image straight onto **`make_and_push_no
 | [`docs/apk_patcher_guide.md`](docs/apk_patcher_guide.md) | Technical breakdown of every APK patcher module, pure-Python signing, wireless install, and safety notes |
 | [`docs/protocol_specs.md`](docs/protocol_specs.md) | Complete LS26 `.bin` container spec (verified across 210+ official dials), opcodes (`01 00`–`01 2e`), and ARGB565-RLE codec |
 | [`docs/hardware_architecture.md`](docs/hardware_architecture.md) | Haylou Watch 4S (`JL7012A7`) hardware teardown and comparison against Realtek-based models |
+| [`docs/firmware_teardown.md`](docs/firmware_teardown.md) | Full `JL7012A7` OTA firmware reverse engineering: cracked SFC flash crypto, silicon BOM, 16 MB NOR partitions, 40-thread RTOS table, BLE GATT ATT DB, `FE EA` framing & hidden capabilities |
 | [`docs/haylou_watch4s_customizer_guide.md`](docs/haylou_watch4s_customizer_guide.md) | End-to-end watchface customization workflow and zero-brick safety analysis |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
 
@@ -244,11 +245,13 @@ haylou-watch4s-watchface-maker/
 │   ├── patch_and_build_apk.py         # Modular pure-Python Haylou Fun v4.0.8 APK patcher
 │   ├── dex_patcher_lib.py             # Pure-Python DEX parser & Dalvik bytecode assembler
 │   ├── apk_signer.py                  # Pure-Python 4-byte/4KB zipalign + v2/v3 APK signer
+│   ├── jieli_fw_unpacker.py           # Pure-Python JL701N .ufw/SFC firmware decrypter & GATT inspector
 │   └── install_to_phone.bat           # One-click ADB APK installer
 ├── tests/
 │   └── test_watch4s.py                # Automated compiler, DEX/APK signer & security tests
 ├── docs/
 │   ├── apk_patcher_guide.md
+│   ├── firmware_teardown.md
 │   ├── protocol_specs.md
 │   ├── hardware_architecture.md
 │   ├── haylou_watch4s_customizer_guide.md
